@@ -1,0 +1,26 @@
+const express = require('express');
+const router = express.Router();
+const verifyToken = require('../middleware/authMiddleware');
+const checkRole = require('../middleware/roleMiddleware');
+const { getMe, updateUserRole } = require('../controllers/userController');
+
+// All routes require Firebase Auth (verifyToken)
+
+// GET /api/users/me - Get current user profile (syncs logic in checkRole)
+router.get('/me', verifyToken, checkRole(), getMe);
+
+// PUT /api/users/:uid/role - Update user role (Only for admins)
+router.put('/:uid/role', verifyToken, checkRole('org:admin'), updateUserRole);
+
+// Example route for 'authority' (mapped to org:member or org:volunteer_head?)
+// Assuming authority -> org:member based on context or keeping strictly to new roles
+router.get('/authority-only', verifyToken, checkRole('org:member'), (req, res) => {
+    res.json({ message: "Welcome, Member! You can assign tasks." });
+});
+
+// Example route for 'volunteer'
+router.get('/volunteer-only', verifyToken, checkRole('org:volunteer'), (req, res) => {
+    res.json({ message: "Welcome, Volunteer! You can accept tasks." });
+});
+
+module.exports = router;
