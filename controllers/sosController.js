@@ -65,16 +65,18 @@ async function createSos(req, res) {
 // GET /api/v1/sos
 async function listSos(req, res) {
   try {
-    const role = req.role || 'citizen';
+    const role = req.role || 'org:user';
     let queryText = 'SELECT * FROM sos_reports ORDER BY created_at DESC LIMIT 100';
     let params = [];
 
-    if (role === 'citizen') {
+    if (role === 'org:user') {
+      // Regular users can only see their own SOS reports
       const { userId } = req.auth || {};
       if (!userId) return res.status(401).json({ message: 'Unauthorized' });
       queryText = 'SELECT * FROM sos_reports WHERE clerk_reporter_id = $1 ORDER BY created_at DESC';
       params = [userId];
-    } else if (role === 'volunteer' || role === 'volunteer_head') {
+    } else if (role === 'org:volunteer' || role === 'org:volunteer_head') {
+      // Volunteers see all unresolved reports sorted by priority
       queryText =
         'SELECT * FROM sos_reports WHERE status != $1 ORDER BY priority_score DESC NULLS LAST, created_at ASC LIMIT 100';
       params = ['resolved'];
@@ -108,9 +110,40 @@ async function updateSosStatus(req, res) {
   try {
     const { id } = req.params;
     const { status } = req.body;
+    const { userId } = req.auth || {};
+    const role = req.role || 'org:user';
+
     const validStatuses = ['pending', 'in_progress', 'resolved', 'cancelled'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ message: `Invalid status. Allowed: ${validStatuses.join(', ')}` });
+    }
+
+    // Check if user has permission to update this SOS
+    const sosResult = await db.query(
+      `SELECT s.*, v.clerk_user_id as assigned_volunteer_clerk_id
+       FROM sos_reports s
+       LEFT JOIN volunteers v ON s.assigned_volunteer_id = v.id
+       WHERE s.id = $1`,
+      [id]
+    );
+
+    if (sosResult.rows.length === 0) {
+      return res.status(404).json({ message: 'SOS report not found' });
+    }
+
+    const sos = sosResult.rows[0];
+    const isReporter = sos.clerk_reporter_id === userId;
+    const isAssignedVolunteer = sos.assigned_volunteer_clerk_id === userId;
+    const isAdminOrHead = ['org:admin', 'org:volunteer_head'].includes(role);
+
+    // Authorization: reporter can cancel, assigned volunteer can update progress, admins can do anything
+    if (!isReporter && !isAssignedVolunteer && !isAdminOrHead) {
+      return res.status(403).json({ message: 'You do not have permission to update this SOS report' });
+    }
+
+    // Additional rule: reporters can only cancel their own reports
+    if (isReporter && !isAssignedVolunteer && !isAdminOrHead && status !== 'cancelled') {
+      return res.status(403).json({ message: 'You can only cancel your own SOS reports' });
     }
 
     const result = await db.query(
@@ -121,10 +154,6 @@ async function updateSosStatus(req, res) {
        RETURNING *`,
       [status, id]
     );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'SOS report not found' });
-    }
 
     res.json(result.rows[0]);
   } catch (err) {

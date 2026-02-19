@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const { errors } = require('../utils/errors');
 
 // POST /api/v1/tasks
 async function createTask(req, res) {
@@ -9,19 +10,25 @@ async function createTask(req, res) {
     }
 
     const { userId } = req.auth || {};
-    const assigner = await db.query('SELECT id FROM users WHERE clerk_user_id = $1', [userId]);
-    const assignedById = assigner.rows[0]?.id || null;
 
-    const result = await db.query(
-      `INSERT INTO tasks (sos_id, volunteer_id, assigned_by, status, instructions, created_at)
-       VALUES ($1, $2, $3, 'assigned', $4, NOW())
-       RETURNING *`,
-      [sosId, volunteerId, assignedById, instructions || null]
-    );
+    // Use transaction to ensure atomic task creation + SOS update
+    const result = await db.transaction(async (client) => {
+      const assigner = await client.query('SELECT id FROM users WHERE clerk_user_id = $1', [userId]);
+      const assignedById = assigner.rows[0]?.id || null;
 
-    await db.query('UPDATE sos_reports SET assigned_volunteer_id = $1 WHERE id = $2', [volunteerId, sosId]);
+      const taskResult = await client.query(
+        `INSERT INTO tasks (sos_id, volunteer_id, assigned_by, status, instructions, created_at)
+         VALUES ($1, $2, $3, 'assigned', $4, NOW())
+         RETURNING *`,
+        [sosId, volunteerId, assignedById, instructions || null]
+      );
 
-    res.status(201).json(result.rows[0]);
+      await client.query('UPDATE sos_reports SET assigned_volunteer_id = $1 WHERE id = $2', [volunteerId, sosId]);
+
+      return taskResult.rows[0];
+    });
+
+    res.status(201).json(result);
   } catch (err) {
     console.error('Error creating task:', err);
     res.status(500).json({ message: 'Failed to create task' });
@@ -75,12 +82,37 @@ async function updateTaskStatus(id, status, extra = {}) {
   return result.rows[0] || null;
 }
 
+// Helper to verify task ownership
+async function verifyTaskOwnership(taskId, clerkUserId) {
+  const result = await db.query(
+    `SELECT t.*, v.clerk_user_id as volunteer_clerk_id
+     FROM tasks t
+     JOIN volunteers v ON t.volunteer_id = v.id
+     WHERE t.id = $1`,
+    [taskId]
+  );
+  
+  if (result.rows.length === 0) {
+    return { exists: false, isOwner: false, task: null };
+  }
+  
+  const task = result.rows[0];
+  const isOwner = task.volunteer_clerk_id === clerkUserId;
+  return { exists: true, isOwner, task };
+}
+
 // PATCH /api/v1/tasks/:id/accept
 async function acceptTask(req, res) {
   try {
     const { id } = req.params;
+    const { userId } = req.auth || {};
+
+    // Verify task ownership
+    const { exists, isOwner, task: existingTask } = await verifyTaskOwnership(id, userId);
+    if (!exists) return res.status(404).json({ message: 'Task not found' });
+    if (!isOwner) return res.status(403).json({ message: 'You can only accept tasks assigned to you' });
+
     const task = await updateTaskStatus(id, 'accepted');
-    if (!task) return res.status(404).json({ message: 'Task not found' });
     res.json(task);
   } catch (err) {
     console.error('Error accepting task:', err);
@@ -92,8 +124,14 @@ async function acceptTask(req, res) {
 async function startTask(req, res) {
   try {
     const { id } = req.params;
+    const { userId } = req.auth || {};
+
+    // Verify task ownership
+    const { exists, isOwner } = await verifyTaskOwnership(id, userId);
+    if (!exists) return res.status(404).json({ message: 'Task not found' });
+    if (!isOwner) return res.status(403).json({ message: 'You can only start tasks assigned to you' });
+
     const task = await updateTaskStatus(id, 'in_progress');
-    if (!task) return res.status(404).json({ message: 'Task not found' });
     res.json(task);
   } catch (err) {
     console.error('Error starting task:', err);
@@ -105,9 +143,15 @@ async function startTask(req, res) {
 async function completeTask(req, res) {
   try {
     const { id } = req.params;
+    const { userId } = req.auth || {};
     const { proofImages } = req.body;
+
+    // Verify task ownership
+    const { exists, isOwner } = await verifyTaskOwnership(id, userId);
+    if (!exists) return res.status(404).json({ message: 'Task not found' });
+    if (!isOwner) return res.status(403).json({ message: 'You can only complete tasks assigned to you' });
+
     const task = await updateTaskStatus(id, 'completed', { proofImages: proofImages || [] });
-    if (!task) return res.status(404).json({ message: 'Task not found' });
     res.json(task);
   } catch (err) {
     console.error('Error completing task:', err);

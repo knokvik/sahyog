@@ -3,13 +3,14 @@
 CREATE EXTENSION IF NOT EXISTS postgis;
 
 -- Users table (synced from Clerk, or lazily on first backend call)
+-- Roles: org:user (default citizen), org:volunteer, org:volunteer_head, org:member, org:admin
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   clerk_user_id VARCHAR(255) UNIQUE NOT NULL,
   email VARCHAR(255) UNIQUE,
   phone VARCHAR(20),
   full_name VARCHAR(255),
-  role VARCHAR(50) CHECK (role IN ('citizen', 'volunteer', 'volunteer_head', 'admin')),
+  role VARCHAR(50) CHECK (role IN ('org:user', 'org:volunteer', 'org:volunteer_head', 'org:member', 'org:admin')),
   avatar_url TEXT,
   is_active BOOLEAN DEFAULT TRUE,
   last_active TIMESTAMP,

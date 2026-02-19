@@ -17,7 +17,7 @@ async function ensureUserInDb(clerkUserId) {
   const email = clerkUser.emailAddresses?.[0]?.emailAddress || null;
   const phone = clerkUser.phoneNumbers?.[0]?.phoneNumber || null;
   const fullName = [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(' ') || null;
-  const role = clerkUser.publicMetadata?.role || 'citizen';
+  const role = clerkUser.publicMetadata?.role || 'org:user';
   const avatarUrl = clerkUser.imageUrl || null;
 
   const insert = await db.query(
