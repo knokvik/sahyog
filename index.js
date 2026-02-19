@@ -17,7 +17,24 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json()); // Body parser
 
-// Routes
+// Request logging (every request – for testing)
+const requestLogger = require('./middleware/requestLogger');
+app.use(requestLogger);
+
+// No-auth routes (order matters: exact paths before app.use)
+app.get('/', (req, res) => {
+    res.json({ message: "Welcome to Sahyog Backend API (Clerk + Postgres)" });
+});
+
+// Health check route - using app.use for Express 5 compatibility
+const healthRouter = express.Router();
+healthRouter.get('/', (req, res) => {
+    console.log('[health] GET /api/health hit');
+    res.json({ ok: true, message: 'Backend reachable' });
+});
+app.use('/api/health', healthRouter);
+
+// API routes
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/users', userRoutes);
 
@@ -28,10 +45,6 @@ app.use('/api/v1/tasks', taskRoutes);
 app.use('/api/v1/disasters', disasterRoutes);
 app.use('/api/v1/shelters', shelterRoutes);
 app.use('/api/v1/missing', missingRoutes);
-
-app.get('/', (req, res) => {
-    res.json({ message: "Welcome to Sahyog Backend API (Clerk + Postgres)" });
-});
 
 // Error Handling Middleware
 app.use(notFound);

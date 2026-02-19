@@ -37,8 +37,12 @@ const checkRole = (requiredRole) => {
 
             next();
         } catch (err) {
-            console.error('Clerk Error:', err);
-            res.status(500).json({ message: 'Authentication error' });
+            console.error('[500] Clerk/auth error:', err?.message || err);
+            if (process.env.NODE_ENV !== 'production') console.error(err?.stack);
+            res.status(500).json({
+                message: 'Authentication error',
+                ...(process.env.NODE_ENV !== 'production' && { detail: err?.message }),
+            });
         }
     };
 };

@@ -4,17 +4,26 @@ const { clerkClient } = require('@clerk/clerk-sdk-node');
 // @route   GET /api/users/me
 // @access  Private (Any authenticated user)
 const getMe = async (req, res) => {
-    // req.user is populated by checkRole() middleware, fetched from Clerk
-    if (req.user) {
+    try {
+        const user = req.user;
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+        const email = user.emailAddresses?.[0]?.emailAddress ?? null;
         res.json({
-            id: req.user.id,
-            email: req.user.emailAddresses[0]?.emailAddress, // Clerk stores emails in an array
-            role: req.role, // From checkRole middleware
-            created_at: req.user.createdAt,
-            last_login_at: req.user.lastSignInAt
+            id: user.id,
+            email,
+            role: req.role ?? 'org:user',
+            created_at: user.createdAt,
+            last_login_at: user.lastSignInAt ?? null,
         });
-    } else {
-        res.status(404).json({ message: "User not found" });
+    } catch (err) {
+        console.error('[500] getMe error:', err?.message || err);
+        if (process.env.NODE_ENV !== 'production') console.error(err?.stack);
+        res.status(500).json({
+            message: 'Failed to load profile',
+            ...(process.env.NODE_ENV !== 'production' && { detail: err?.message }),
+        });
     }
 };
 

@@ -53,10 +53,11 @@ const logError = (err, context = {}) => {
     timestamp,
     message: err.message,
     statusCode: err.statusCode || 500,
-    stack: process.env.NODE_ENV === 'production' ? undefined : err.stack,
+    ...(process.env.NODE_ENV !== 'production' && { stack: err.stack }),
     ...context,
   };
   console.error('[ERROR]', JSON.stringify(logEntry, null, 2));
+  if (process.env.NODE_ENV !== 'production' && err.stack) console.error(err.stack);
 };
 
 module.exports = {
