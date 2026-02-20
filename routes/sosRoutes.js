@@ -15,6 +15,7 @@ router.get('/', verifyToken, checkRole(), sosController.listSos);
 router.get('/nearby', verifyToken, checkRole(), validators.nearbySos, sosController.getNearbySos);
 
 router.get('/:id', verifyToken, checkRole(), validators.uuidParam, sosController.getSosById);
+router.get('/:id/tasks', verifyToken, checkRole(), validators.uuidParam, sosController.getTasksForSos);
 
 // Status changes - authorization checked in controller
 router.patch('/:id/status', verifyToken, checkRole(), validators.updateSosStatus, sosController.updateSosStatus);
