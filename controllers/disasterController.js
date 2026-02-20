@@ -16,20 +16,20 @@ async function createDisaster(req, res) {
          $1,
          $2,
          $3,
-         CASE WHEN $4 IS NOT NULL THEN ST_GeomFromGeoJSON($4)::geography ELSE NULL END,
+         CASE WHEN $4::text IS NOT NULL THEN ST_GeomFromGeoJSON($4::text)::geography ELSE NULL END,
          'active',
          NOW(),
          $5,
          $6
        )
        RETURNING *`,
-      [name, type || null, severity || null, polygon || null, user.id, user.clerk_user_id]
+      [name, type || null, severity || null, polygon ? JSON.stringify(polygon) : null, user.id, user.clerk_user_id]
     );
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('Error creating disaster:', err);
-    res.status(500).json({ message: 'Failed to create disaster' });
+    res.status(500).json({ message: 'Failed to create disaster: ' + err.message });
   }
 }
 
@@ -152,6 +152,27 @@ async function getDisasterStats(req, res) {
   }
 }
 
+// GET /api/v1/disasters/:id/tasks
+async function getDisasterTasks(req, res) {
+  try {
+    const { id } = req.params;
+    const result = await db.query(
+      `SELECT t.*, u.full_name as volunteer_name, u.avatar_url as volunteer_avatar
+       FROM tasks t
+       JOIN volunteers v ON t.volunteer_id = v.id
+       JOIN users u ON v.user_id = u.id
+       JOIN sos_reports s ON t.sos_id = s.id
+       WHERE s.disaster_id = $1
+       ORDER BY t.created_at ASC`,
+      [id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching tasks for disaster:', err);
+    res.status(500).json({ message: 'Failed to fetch tasks for disaster' });
+  }
+}
+
 module.exports = {
   createDisaster,
   listDisasters,
@@ -160,5 +181,6 @@ module.exports = {
   activateDisaster,
   resolveDisaster,
   getDisasterStats,
+  getDisasterTasks,
 };
 

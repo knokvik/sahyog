@@ -16,6 +16,7 @@ router.post('/:id/resolve', verifyToken, checkRole('org:admin'), validators.uuid
 router.get('/', verifyToken, checkRole(), disasterController.listDisasters);
 router.get('/:id', verifyToken, checkRole(), validators.uuidParam, disasterController.getDisasterById);
 router.get('/:id/stats', verifyToken, checkRole('org:admin'), validators.uuidParam, disasterController.getDisasterStats);
+router.get('/:id/tasks', verifyToken, checkRole('org:admin'), validators.uuidParam, disasterController.getDisasterTasks);
 
 module.exports = router;
 
