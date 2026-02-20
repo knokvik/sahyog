@@ -2,9 +2,12 @@ const express = require('express');
 const router = express.Router();
 const verifyToken = require('../middleware/authMiddleware');
 const checkRole = require('../middleware/roleMiddleware');
-const { getMe, updateUserRole } = require('../controllers/userController');
+const { getMe, updateUserRole, listUsers } = require('../controllers/userController');
 
-// All routes require Firebase Auth (verifyToken)
+// All routes require Clerk Auth (verifyToken)
+
+// GET /api/users - List all users (Admin only)
+router.get('/', verifyToken, checkRole('org:admin'), listUsers);
 
 // GET /api/users/me - Get current user profile (syncs logic in checkRole)
 router.get('/me', verifyToken, checkRole(), getMe);

@@ -82,7 +82,29 @@ const updateUserRole = async (req, res) => {
     }
 };
 
+// @desc    List all users (Admin only)
+// @route   GET /api/users
+// @access  Private (Admin only)
+const listUsers = async (req, res) => {
+    try {
+        const result = await db.query(
+            `SELECT id, clerk_user_id, full_name, email, role, phone, avatar_url, created_at, updated_at
+             FROM users
+             ORDER BY created_at DESC
+             LIMIT 200`
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error('[500] listUsers error:', err?.message || err);
+        res.status(500).json({
+            message: 'Failed to list users',
+            ...(process.env.NODE_ENV !== 'production' && { detail: err?.message }),
+        });
+    }
+};
+
 module.exports = {
     getMe,
-    updateUserRole
+    updateUserRole,
+    listUsers,
 };
