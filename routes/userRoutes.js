@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const verifyToken = require('../middleware/authMiddleware');
 const checkRole = require('../middleware/roleMiddleware');
-const { getMe, updateUserRole, listUsers } = require('../controllers/userController');
+const { getMe, updateUserRole, listUsers, onboardUser } = require('../controllers/userController');
 
 // All routes require Clerk Auth (verifyToken)
 
@@ -11,6 +11,9 @@ router.get('/', verifyToken, checkRole('org:admin'), listUsers);
 
 // GET /api/users/me - Get current user profile (syncs logic in checkRole)
 router.get('/me', verifyToken, checkRole(), getMe);
+
+// POST /api/users/onboard - Set role and save additional info
+router.post('/onboard', verifyToken, onboardUser);
 
 // PUT /api/users/:uid/role - Update user role (Only for admins)
 router.put('/:uid/role', verifyToken, checkRole('org:admin'), updateUserRole);

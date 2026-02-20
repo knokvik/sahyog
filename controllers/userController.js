@@ -103,8 +103,68 @@ const listUsers = async (req, res) => {
     }
 };
 
+// @desc    Onboard user with form details (Volunteer or Volunteer Head)
+// @route   POST /api/users/onboard
+// @access  Private
+const onboardUser = async (req, res) => {
+    try {
+        const uid = req.user.id;
+        const { role, skills, radius, organization, certification_id, region } = req.body;
+
+        if (!['org:volunteer', 'org:volunteer_head'].includes(role)) {
+            return res.status(400).json({ message: "Invalid role for onboarding" });
+        }
+
+        // 1. Ensure user is in our local DB
+        await ensureUserInDb(uid);
+
+        // 2. Fetch the actual postgres UUID for this user
+        const userDbResult = await db.query('SELECT id FROM users WHERE clerk_user_id = $1', [uid]);
+        if (userDbResult.rows.length === 0) {
+            return res.status(404).json({ message: "Local user record not found" });
+        }
+        const dbUserId = userDbResult.rows[0].id;
+
+        // 3. Update Clerk metadata
+        await clerkClient.users.updateUserMetadata(uid, {
+            publicMetadata: { role: role }
+        });
+
+        // 4. Update local DB Role
+        await db.query(
+            'UPDATE users SET role = $1, updated_at = NOW() WHERE clerk_user_id = $2',
+            [role, uid]
+        );
+
+        // 5. Insert into respective sub-tables based on selected role
+        if (role === 'org:volunteer') {
+            await db.query(`
+                INSERT INTO volunteers (user_id, clerk_user_id, skills, service_area, is_available) 
+                VALUES ($1, $2, $3, ST_Buffer(ST_MakePoint(0,0), $4::float), true)
+                ON CONFLICT (id) DO NOTHING
+            `, [dbUserId, uid, skills || [], radius || 10]);
+        } else if (role === 'org:volunteer_head') {
+            await db.query(`
+                INSERT INTO volunteer_heads (user_id, clerk_user_id, organization, certification_id, region)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (id) DO NOTHING
+            `, [dbUserId, uid, organization || '', certification_id || '', region || '']);
+        }
+
+        res.status(200).json({ message: "Onboarding complete", role });
+
+    } catch (err) {
+        console.error('[500] onboardUser error:', err?.message || err);
+        res.status(500).json({
+            message: 'Failed to complete onboarding Form',
+            ...(process.env.NODE_ENV !== 'production' && { detail: err?.message }),
+        });
+    }
+};
+
 module.exports = {
     getMe,
     updateUserRole,
     listUsers,
+    onboardUser
 };

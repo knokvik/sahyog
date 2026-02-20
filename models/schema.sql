@@ -38,6 +38,17 @@ CREATE TABLE IF NOT EXISTS volunteers (
 
 CREATE INDEX IF NOT EXISTS idx_volunteer_location ON volunteers USING GIST (current_location);
 
+-- Volunteer Heads
+CREATE TABLE IF NOT EXISTS volunteer_heads (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  clerk_user_id VARCHAR(255) REFERENCES users(clerk_user_id),
+  organization VARCHAR(255),
+  certification_id VARCHAR(255),
+  region VARCHAR(255),
+  is_verified BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP DEFAULT NOW()
+);
 -- Disasters
 CREATE TABLE IF NOT EXISTS disasters (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
