@@ -1,108 +1,52 @@
 const db = require('../config/db');
-const { ensureUserInDb } = require('../utils/userSync');
 
-// POST /api/v1/missing
-async function reportMissing(req, res) {
+async function reportMissingPerson(req, res) {
   try {
-    const { userId } = req.auth || {};
-    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+    const { reporter_phone, name, age, last_seen_location, photo_urls, disaster_id } = req.body;
 
-    const user = await ensureUserInDb(userId);
-    const { disasterId, name, age, description, lat, lng, photos } = req.body;
+    if (!reporter_phone) return res.status(400).json({ message: 'Reporter phone is required' });
 
-    if (!name) return res.status(400).json({ message: 'name is required' });
+    const locString = last_seen_location ? `POINT(${last_seen_location.lng} ${last_seen_location.lat})` : null;
 
     const result = await db.query(
-      `INSERT INTO missing_persons
-       (reporter_id, disaster_id, name, age, description, last_seen_location, photos, status, created_at)
-       VALUES (
-         $1,
-         $2,
-         $3,
-         $4,
-         $5,
-         CASE
-           WHEN $6 IS NOT NULL AND $7 IS NOT NULL
-           THEN ST_SetSRID(ST_MakePoint($7, $6), 4326)::geography
-           ELSE NULL
-         END,
-         $8,
-         'missing',
-         NOW()
-       )
+      `INSERT INTO missing_persons (reporter_phone, name, age, last_seen_location, photo_urls, disaster_id)
+       VALUES ($1, $2, $3, CASE WHEN $4::text IS NOT NULL THEN ST_GeogFromText($4::text)::geography ELSE NULL END, $5, $6)
        RETURNING *`,
-      [user.id, disasterId || null, name, age || null, description || null, lat || null, lng || null, photos || []]
+      [reporter_phone, name || null, age || null, locString, photo_urls || null, disaster_id || null]
     );
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('Error reporting missing person:', err);
-    res.status(500).json({ message: 'Failed to report missing person' });
+    res.status(500).json({ message: 'Failed to report missing person: ' + err.message });
   }
 }
 
-// GET /api/v1/missing
-async function searchMissing(req, res) {
+async function listMissingPersons(req, res) {
   try {
-    const { disasterId, status, name } = req.query;
-    const params = [];
-    const conditions = [];
-
-    if (disasterId) {
-      params.push(disasterId);
-      conditions.push(`disaster_id = $${params.length}`);
-    }
-
-    if (status) {
-      params.push(status);
-      conditions.push(`status = $${params.length}`);
-    }
-
-    if (name) {
-      params.push(`%${name}%`);
-      conditions.push(`name ILIKE $${params.length}`);
-    }
-
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-    const result = await db.query(
-      `SELECT * FROM missing_persons ${where} ORDER BY created_at DESC LIMIT 200`,
-      params
-    );
-
+    const result = await db.query('SELECT * FROM missing_persons ORDER BY created_at DESC');
     res.json(result.rows);
   } catch (err) {
-    console.error('Error searching missing persons:', err);
-    res.status(500).json({ message: 'Failed to search missing persons' });
+    console.error('Error listing missing persons:', err);
+    res.status(500).json({ message: 'Failed to list missing persons' });
   }
 }
 
-// PATCH /api/v1/missing/:id/found
 async function markFound(req, res) {
   try {
     const { id } = req.params;
     const result = await db.query(
-      `UPDATE missing_persons
-       SET status = 'found',
-           found_at = NOW()
-       WHERE id = $1
-       RETURNING *`,
+      `UPDATE missing_persons 
+       SET status = 'found', found_at = NOW() 
+       WHERE id = $1 RETURNING *`,
       [id]
     );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'Missing person record not found' });
-    }
-
+    if (result.rows.length === 0) return res.status(404).json({ message: 'Not found' });
     res.json(result.rows[0]);
   } catch (err) {
-    console.error('Error marking missing person as found:', err);
-    res.status(500).json({ message: 'Failed to update missing person' });
+    console.error('Error marking found:', err);
+    res.status(500).json({ message: 'Failed to mark found' });
   }
 }
 
-module.exports = {
-  reportMissing,
-  searchMissing,
-  markFound,
-};
-
+module.exports = { reportMissingPerson, listMissingPersons, markFound };

@@ -6,24 +6,24 @@ async function createDisaster(req, res) {
   try {
     const { name, type, severity, polygon } = req.body;
     if (!name) return res.status(400).json({ message: 'name is required' });
+    if (!type) return res.status(400).json({ message: 'type is required' });
 
     const { userId } = req.auth || {};
     const user = await ensureUserInDb(userId);
 
     const result = await db.query(
-      `INSERT INTO disasters (name, type, severity, affected_area, status, activated_at, created_by, clerk_created_by)
+      `INSERT INTO disasters (name, type, severity, affected_area, status, activated_by, activated_at)
        VALUES (
          $1,
          $2,
          $3,
-         CASE WHEN $4::text IS NOT NULL THEN ST_GeomFromGeoJSON($4::text)::geography ELSE NULL END,
-         'active',
-         NOW(),
+         CASE WHEN $4::text IS NOT NULL THEN ST_Multi(ST_GeomFromGeoJSON($4::text))::geometry(MultiPolygon, 4326) ELSE NULL END,
+         'monitoring',
          $5,
-         $6
+         NOW()
        )
        RETURNING *`,
-      [name, type || null, severity || null, polygon ? JSON.stringify(polygon) : null, user.id, user.clerk_user_id]
+      [name, type, severity || null, polygon ? JSON.stringify(polygon) : null, user.id]
     );
 
     res.status(201).json(result.rows[0]);
@@ -37,7 +37,7 @@ async function createDisaster(req, res) {
 async function listDisasters(req, res) {
   try {
     const result = await db.query(
-      'SELECT * FROM disasters WHERE status IN (\'active\', \'contained\') ORDER BY activated_at DESC'
+      'SELECT * FROM disasters WHERE status IN (\'monitoring\', \'active\', \'contained\') ORDER BY created_at DESC'
     );
     res.json(result.rows);
   } catch (err) {
@@ -75,7 +75,7 @@ async function updateDisaster(req, res) {
            status = COALESCE($4, status)
        WHERE id = $5
        RETURNING *`,
-      [name || null, type || null, severity || null, status || null, id]
+      [name || null, type || null, severity !== undefined ? severity : null, status || null, id]
     );
 
     if (result.rows.length === 0) {
@@ -93,13 +93,17 @@ async function updateDisaster(req, res) {
 async function activateDisaster(req, res) {
   try {
     const { id } = req.params;
+    const { userId } = req.auth || {};
+    const user = await ensureUserInDb(userId);
+
     const result = await db.query(
       `UPDATE disasters
        SET status = 'active',
-           activated_at = NOW()
+           activated_at = NOW(),
+           activated_by = $2
        WHERE id = $1
        RETURNING *`,
-      [id]
+      [id, user.id]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'Disaster not found' });
@@ -139,9 +143,10 @@ async function getDisasterStats(req, res) {
     const { id } = req.params;
     const stats = await db.query(
       `SELECT
-         (SELECT COUNT(*) FROM sos_reports WHERE disaster_id = $1) AS total_sos,
-         (SELECT COUNT(*) FROM sos_reports WHERE disaster_id = $1 AND status = 'resolved') AS resolved_sos,
-         (SELECT COUNT(*) FROM tasks WHERE sos_id IN (SELECT id FROM sos_reports WHERE disaster_id = $1)) AS total_tasks
+         (SELECT COUNT(*) FROM needs WHERE disaster_id = $1) AS total_needs,
+         (SELECT COUNT(*) FROM needs WHERE disaster_id = $1 AND status = 'resolved') AS resolved_needs,
+         (SELECT COUNT(*) FROM zones WHERE disaster_id = $1) AS total_zones,
+         (SELECT COUNT(*) FROM tasks WHERE disaster_id = $1) AS total_tasks
        `,
       [id]
     );
@@ -159,10 +164,8 @@ async function getDisasterTasks(req, res) {
     const result = await db.query(
       `SELECT t.*, u.full_name as volunteer_name, u.avatar_url as volunteer_avatar
        FROM tasks t
-       JOIN volunteers v ON t.volunteer_id = v.id
-       JOIN users u ON v.user_id = u.id
-       JOIN sos_reports s ON t.sos_id = s.id
-       WHERE s.disaster_id = $1
+       LEFT JOIN users u ON t.volunteer_id = u.id
+       WHERE t.disaster_id = $1
        ORDER BY t.created_at ASC`,
       [id]
     );
@@ -183,4 +186,3 @@ module.exports = {
   getDisasterStats,
   getDisasterTasks,
 };
-

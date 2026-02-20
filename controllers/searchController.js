@@ -11,32 +11,31 @@ exports.globalSearch = async (req, res, next) => {
         const searchQuery = `%${q}%`;
         const results = {
             users: [],
-            volunteers: [],
+            needs: [],
             disasters: [],
-            shelters: [],
+            resources: [],
             missing_persons: []
         };
 
-        // 1. Search Users
+        // 1. Search Users (replaces old volunteers + users search)
         const usersResult = await pool.query(
             `SELECT id, full_name as name, email, role, avatar_url 
              FROM users 
-             WHERE full_name ILIKE $1 OR email ILIKE $1 
+             WHERE full_name ILIKE $1 OR email ILIKE $1 OR role ILIKE $1
              LIMIT 5`,
             [searchQuery]
         );
         results.users = usersResult.rows;
 
-        // 2. Search Volunteers
-        const volunteersResult = await pool.query(
-            `SELECT v.id, u.full_name as name, u.email, v.skills, v.rating, v.is_available 
-             FROM volunteers v 
-             JOIN users u ON v.user_id = u.id 
-             WHERE u.full_name ILIKE $1 OR array_to_string(v.skills, ',') ILIKE $1 
+        // 2. Search Needs (replaces old sos_reports)
+        const needsResult = await pool.query(
+            `SELECT id, request_code, reporter_name as name, type, status, urgency 
+             FROM needs 
+             WHERE reporter_name ILIKE $1 OR type ILIKE $1 OR request_code ILIKE $1 OR description ILIKE $1
              LIMIT 5`,
             [searchQuery]
         );
-        results.volunteers = volunteersResult.rows;
+        results.needs = needsResult.rows;
 
         // 3. Search Disasters
         const disastersResult = await pool.query(
@@ -48,28 +47,27 @@ exports.globalSearch = async (req, res, next) => {
         );
         results.disasters = disastersResult.rows;
 
-        // 4. Search Shelters
-        const sheltersResult = await pool.query(
-            `SELECT id, name, capacity, current_occupancy, status 
-             FROM shelters 
-             WHERE name ILIKE $1 OR array_to_string(facilities, ',') ILIKE $1 
+        // 4. Search Resources (replaces old shelters)
+        const resourcesResult = await pool.query(
+            `SELECT id, type, quantity, status 
+             FROM resources 
+             WHERE type ILIKE $1 OR status ILIKE $1
              LIMIT 5`,
             [searchQuery]
         );
-        results.shelters = sheltersResult.rows;
+        results.resources = resourcesResult.rows;
 
         // 5. Search Missing Persons
         const missingPersonsResult = await pool.query(
             `SELECT id, name, age, status 
              FROM missing_persons 
-             WHERE name ILIKE $1 OR description ILIKE $1 
+             WHERE name ILIKE $1 OR reporter_phone ILIKE $1 
              LIMIT 5`,
             [searchQuery]
         );
         results.missing_persons = missingPersonsResult.rows;
 
-        // Calculate total results found
-        const totalFound = Object.values(results).reduce((acc, currentArray) => acc + currentArray.length, 0);
+        const totalFound = Object.values(results).reduce((acc, arr) => acc + arr.length, 0);
 
         res.status(200).json({
             status: 'success',
