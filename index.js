@@ -11,6 +11,7 @@ const resourceRoutes = require('./routes/resourceRoutes');
 const missingRoutes = require('./routes/missingRoutes');
 const serverRoutes = require('./routes/serverRoutes');
 const searchRoutes = require('./routes/searchRoutes');
+const organizationRoutes = require('./routes/organizationRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -49,6 +50,7 @@ app.use('/api/v1/resources', resourceRoutes);
 app.use('/api/v1/missing', missingRoutes);
 app.use('/api/v1/server', serverRoutes);
 app.use('/api/v1/search', searchRoutes);
+app.use('/api/v1/organizations', organizationRoutes);
 
 // Error Handling Middleware
 app.use(notFound);

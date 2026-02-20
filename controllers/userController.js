@@ -13,14 +13,24 @@ const getMe = async (req, res) => {
         }
         const email = user.emailAddresses?.[0]?.emailAddress ?? null;
 
-        // Also look up the DB role (source of truth)
-        const dbUser = await db.query('SELECT role FROM users WHERE clerk_user_id = $1', [user.id]);
+        // Look up the DB role and organization (source of truth)
+        const dbUser = await db.query(
+            `SELECT u.role, u.organization_id, o.name as organization_name
+             FROM users u
+             LEFT JOIN organizations o ON u.organization_id = o.id
+             WHERE u.clerk_user_id = $1`,
+            [user.id]
+        );
         const dbRole = dbUser.rows[0]?.role || 'volunteer';
+        const orgId = dbUser.rows[0]?.organization_id || null;
+        const orgName = dbUser.rows[0]?.organization_name || null;
 
         res.json({
             id: user.id,
             email,
             role: dbRole,
+            organization_id: orgId,
+            organization_name: orgName,
             created_at: user.createdAt,
             last_login_at: user.lastSignInAt ?? null,
         });
