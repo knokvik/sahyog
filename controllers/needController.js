@@ -26,7 +26,13 @@ async function createNeed(req, res) {
 
 async function listNeeds(req, res) {
     try {
-        const result = await db.query('SELECT * FROM needs ORDER BY reported_at DESC');
+        const result = await db.query(`
+            SELECT *,
+                   ST_X(location::geometry) AS lng,
+                   ST_Y(location::geometry) AS lat
+            FROM needs 
+            ORDER BY reported_at DESC
+        `);
         const rows = [...result.rows];
 
         const email = req.user?.emailAddresses?.[0]?.emailAddress;

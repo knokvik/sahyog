@@ -26,17 +26,17 @@ async function createSos(req, res) {
     });
 
     const result = await db.query(
-      `INSERT INTO sos_reports
+      `INSERT INTO sos_alerts
        (reporter_id, clerk_reporter_id, disaster_id, location, type, description, priority_score, status, media_urls, created_at)
        VALUES (
          $1,
          $2,
          $3,
-         ST_SetSRID(ST_MakePoint($4, $5), 4326)::geography,
+         ST_SetSRID(ST_MakePoint($4, $5), 4326),
          $6,
          $7,
          $8,
-         'pending',
+         'triggered',
          $9,
          $10
        )
@@ -66,34 +66,35 @@ async function createSos(req, res) {
 async function listSos(req, res) {
   try {
     const role = req.role || 'volunteer';
+    const dbUser = req.dbUser;
+
+    if (!dbUser) return res.status(401).json({ message: 'Unauthorized' });
 
     let queryText = `
       SELECT s.*,
-             ST_X(s.location) AS lng, ST_Y(s.location) AS lat,
+             ST_X(s.location::geometry) AS lng, ST_Y(s.location::geometry) AS lat,
              u.full_name AS volunteer_name,
              d.name      AS disaster_name
       FROM sos_alerts s
-      LEFT JOIN users u     ON u.id = s.volunteer_id
-      LEFT JOIN disasters d ON d.id = s.disaster_id
-      ORDER BY s.created_at DESC LIMIT 100`;
+      LEFT JOIN users u     ON u.id = s.acknowledged_by
+      LEFT JOIN disasters d ON d.id = s.disaster_id`;
+
     let params = [];
 
-    // Volunteers only see their own SOS alerts
+    // Filter logic based on role
     if (role === 'volunteer') {
-      const dbUser = req.dbUser;
-      if (!dbUser) return res.status(401).json({ message: 'Unauthorized' });
-      queryText = `
-        SELECT s.*,
-               ST_X(s.location) AS lng, ST_Y(s.location) AS lat,
-               u.full_name AS volunteer_name,
-               d.name      AS disaster_name
-        FROM sos_alerts s
-        LEFT JOIN users u     ON u.id = s.volunteer_id
-        LEFT JOIN disasters d ON d.id = s.disaster_id
-        WHERE s.volunteer_id = $1
-        ORDER BY s.created_at DESC`;
+      // Volunteers might only see alerts they are involved in or all alerts if they need to respond
+      // For now, let's keep it to their own created or assigned alerts
+      queryText += ` WHERE s.reporter_id = $1 OR s.acknowledged_by = $1`;
+      params = [dbUser.id];
+    } else if (role === 'user') {
+      // Citizens only see their own reports
+      queryText += ` WHERE s.reporter_id = $1`;
       params = [dbUser.id];
     }
+    // Coordinators see everything in the initial SQL (no WHERE)
+
+    queryText += ` ORDER BY s.created_at DESC LIMIT 100`;
 
     const result = await db.query(queryText, params);
     res.json(result.rows);
@@ -107,14 +108,14 @@ async function listSos(req, res) {
 async function getSosById(req, res) {
   try {
     const { id } = req.params;
-    const result = await db.query('SELECT * FROM sos_reports WHERE id = $1', [id]);
+    const result = await db.query('SELECT * FROM sos_alerts WHERE id = $1', [id]);
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'SOS report not found' });
+      return res.status(404).json({ message: 'SOS alert not found' });
     }
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Error fetching SOS:', err);
-    res.status(500).json({ message: 'Failed to fetch SOS report' });
+    res.status(500).json({ message: 'Failed to fetch SOS alert' });
   }
 }
 
@@ -124,48 +125,50 @@ async function updateSosStatus(req, res) {
     const { id } = req.params;
     const { status } = req.body;
     const { userId } = req.auth || {};
-    const role = req.role || 'org:user';
+    const role = req.role || 'user';
 
-    const validStatuses = ['pending', 'in_progress', 'resolved', 'cancelled'];
+    const validStatuses = ['triggered', 'acknowledged', 'resolved', 'cancelled'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ message: `Invalid status. Allowed: ${validStatuses.join(', ')}` });
     }
 
     // Check if user has permission to update this SOS
     const sosResult = await db.query(
-      `SELECT s.*, v.clerk_user_id as assigned_volunteer_clerk_id
-       FROM sos_reports s
-       LEFT JOIN volunteers v ON s.assigned_volunteer_id = v.id
+      `SELECT s.*, u.clerk_user_id as acknowledged_by_clerk_id
+       FROM sos_alerts s
+       LEFT JOIN users u ON s.acknowledged_by = u.id
        WHERE s.id = $1`,
       [id]
     );
 
     if (sosResult.rows.length === 0) {
-      return res.status(404).json({ message: 'SOS report not found' });
+      return res.status(404).json({ message: 'SOS alert not found' });
     }
 
     const sos = sosResult.rows[0];
     const isReporter = sos.clerk_reporter_id === userId;
-    const isAssignedVolunteer = sos.assigned_volunteer_clerk_id === userId;
-    const isAdminOrHead = ['org:admin', 'org:volunteer_head'].includes(role);
+    const isAcknowledgedByMe = sos.acknowledged_by_clerk_id === userId;
+    const isAdminOrHead = ['admin', 'coordinator'].includes(role);
 
-    // Authorization: reporter can cancel, assigned volunteer can update progress, admins can do anything
-    if (!isReporter && !isAssignedVolunteer && !isAdminOrHead) {
-      return res.status(403).json({ message: 'You do not have permission to update this SOS report' });
+    // Authorization: reporter can cancel, responder can update, admins can do anything
+    if (!isReporter && !isAcknowledgedByMe && !isAdminOrHead) {
+      return res.status(403).json({ message: 'You do not have permission to update this SOS alert' });
     }
 
-    // Additional rule: reporters can only cancel their own reports
-    if (isReporter && !isAssignedVolunteer && !isAdminOrHead && status !== 'cancelled') {
+    // Reporters can only cancel their own reports
+    if (isReporter && !isAcknowledgedByMe && !isAdminOrHead && status !== 'cancelled') {
       return res.status(403).json({ message: 'You can only cancel your own SOS reports' });
     }
 
     const result = await db.query(
-      `UPDATE sos_reports
+      `UPDATE sos_alerts
        SET status = $1,
-           resolved_at = CASE WHEN $1 = 'resolved' THEN NOW() ELSE resolved_at END
-       WHERE id = $2
+           resolved_at = CASE WHEN $1 = 'resolved' THEN NOW() ELSE resolved_at END,
+           acknowledged_by = CASE WHEN $1 = 'acknowledged' AND acknowledged_by IS NULL THEN (SELECT id FROM users WHERE clerk_user_id = $2) ELSE acknowledged_by END,
+           acknowledged_at = CASE WHEN $1 = 'acknowledged' AND acknowledged_at IS NULL THEN NOW() ELSE acknowledged_at END
+       WHERE id = $3
        RETURNING *`,
-      [status, id]
+      [status, userId, id]
     );
 
     res.json(result.rows[0]);
@@ -190,13 +193,13 @@ async function getNearbySos(req, res) {
     const result = await db.query(
       `SELECT *,
               ST_Distance(
-                location,
-                ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
+                location::geometry,
+                ST_SetSRID(ST_MakePoint($1, $2), 4326)
               ) AS distance
-       FROM sos_reports
+       FROM sos_alerts
        WHERE ST_DWithin(
-         location,
-         ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
+         location::geometry,
+         ST_SetSRID(ST_MakePoint($1, $2), 4326),
          $3
        )
        ORDER BY priority_score DESC NULLS LAST, distance ASC
@@ -207,7 +210,7 @@ async function getNearbySos(req, res) {
     res.json(result.rows);
   } catch (err) {
     console.error('Error fetching nearby SOS:', err);
-    res.status(500).json({ message: 'Failed to fetch nearby SOS reports' });
+    res.status(500).json({ message: 'Failed to fetch nearby SOS alerts' });
   }
 }
 

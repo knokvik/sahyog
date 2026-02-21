@@ -1,6 +1,9 @@
 const db = require('../config/db');
 
-async function ensureMissingUpdatesTable() {
+async function ensureMissingPersonSchema() {
+  await db.query(
+    `ALTER TABLE missing_persons ADD COLUMN IF NOT EXISTS description text`
+  );
   await db.query(
     `CREATE TABLE IF NOT EXISTS missing_person_updates (
        id bigserial PRIMARY KEY,
@@ -12,19 +15,31 @@ async function ensureMissingUpdatesTable() {
   );
 }
 
+async function ensureMissingUpdatesTable() {
+  await ensureMissingPersonSchema();
+}
+
 async function reportMissingPerson(req, res) {
   try {
     const { reporter_phone, name, age, last_seen_location, photo_urls, disaster_id } = req.body;
-
     if (!reporter_phone) return res.status(400).json({ message: 'Reporter phone is required' });
-
     const locString = last_seen_location ? `POINT(${last_seen_location.lng} ${last_seen_location.lat})` : null;
 
+    await ensureMissingPersonSchema();
+
     const result = await db.query(
-      `INSERT INTO missing_persons (reporter_phone, name, age, last_seen_location, photo_urls, disaster_id)
-       VALUES ($1, $2, $3, CASE WHEN $4::text IS NOT NULL THEN ST_GeogFromText($4::text)::geography ELSE NULL END, $5, $6)
+      `INSERT INTO missing_persons (reporter_phone, name, age, last_seen_location, photo_urls, disaster_id, description)
+       VALUES ($1, $2, $3, CASE WHEN $4::text IS NOT NULL THEN ST_GeomFromText($4::text, 4326) ELSE NULL END, $5, $6, $7)
        RETURNING *`,
-      [reporter_phone, name || null, age || null, locString, photo_urls || null, disaster_id || null]
+      [
+        reporter_phone,
+        name || null,
+        age || null,
+        locString,
+        photo_urls || null,
+        disaster_id || null,
+        req.body.description || null
+      ]
     );
 
     res.status(201).json(result.rows[0]);
@@ -37,31 +52,7 @@ async function reportMissingPerson(req, res) {
 async function listMissingPersons(req, res) {
   try {
     const result = await db.query('SELECT * FROM missing_persons ORDER BY created_at DESC');
-    const rows = [...result.rows];
-
-    const email = req.user?.emailAddresses?.[0]?.emailAddress;
-    if (email === 'arya.mahindrakar07@gmail.com') {
-      rows.unshift({
-        id: 'debug-missing-1',
-        reporter_phone: '+910000000011',
-        name: 'Debug Missing Person',
-        age: 12,
-        status: 'missing',
-        created_at: new Date().toISOString(),
-        debug: true,
-      });
-      rows.unshift({
-        id: 'debug-missing-2',
-        reporter_phone: '+910000000012',
-        name: 'Debug Found Person',
-        age: 68,
-        status: 'found',
-        created_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-        debug: true,
-      });
-    }
-
-    res.json(rows);
+    res.json(result.rows);
   } catch (err) {
     console.error('Error listing missing persons:', err);
     res.status(500).json({ message: 'Failed to list missing persons' });
@@ -74,7 +65,12 @@ async function markFound(req, res) {
     const { description } = req.body || {};
     const role = req.role || 'volunteer';
 
-    if (!['volunteer', 'coordinator', 'admin'].includes(role)) {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(id)) {
+      return res.status(400).json({ message: 'Invalid report ID format' });
+    }
+
+    if (!['volunteer', 'coordinator', 'admin', 'user'].includes(role)) {
       return res.status(403).json({ message: 'Not allowed to close missing reports' });
     }
 

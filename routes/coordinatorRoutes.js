@@ -12,6 +12,7 @@ const {
     getSos,
     getMissingPersons,
     markMissingFound,
+    reassignTask,
     getZones,
 } = require('../controllers/coordinatorController');
 
@@ -24,6 +25,7 @@ router.get('/needs', verifyJWT, checkRole('coordinator'), getNeeds);
 router.get('/sos', verifyJWT, checkRole('coordinator'), getSos);
 router.get('/missing', verifyJWT, checkRole('coordinator'), getMissingPersons);
 router.patch('/missing/:id/found', verifyJWT, checkRole('coordinator'), markMissingFound);
+router.patch('/tasks/:id/reassign', verifyJWT, checkRole('coordinator'), reassignTask);
 router.get('/zones', verifyJWT, checkRole('coordinator'), getZones);
 
 module.exports = router;

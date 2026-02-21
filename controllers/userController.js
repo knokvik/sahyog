@@ -15,15 +15,17 @@ const getMe = async (req, res) => {
 
         // Look up the DB role and organization (source of truth)
         const dbUser = await db.query(
-            `SELECT u.role, u.organization_id, u.is_active, u.last_active, o.name as organization_name
+            `SELECT u.role, u.organization_id, u.is_active, u.last_active, o.name as organization_name,
+                    u.blood_group, u.medical_history, u.address, u.phone
              FROM users u
              LEFT JOIN organizations o ON u.organization_id = o.id
              WHERE u.clerk_user_id = $1`,
             [user.id]
         );
-        const dbRole = dbUser.rows[0]?.role || 'volunteer';
-        const orgId = dbUser.rows[0]?.organization_id || null;
-        const orgName = dbUser.rows[0]?.organization_name || null;
+        const row = dbUser.rows[0];
+        const dbRole = row?.role || 'volunteer';
+        const orgId = row?.organization_id || null;
+        const orgName = row?.organization_name || null;
 
         res.json({
             id: user.id,
@@ -31,8 +33,12 @@ const getMe = async (req, res) => {
             role: dbRole,
             organization_id: orgId,
             organization_name: orgName,
-            is_active: dbUser.rows[0]?.is_active ?? true,
-            last_active: dbUser.rows[0]?.last_active ?? null,
+            is_active: row?.is_active ?? true,
+            last_active: row?.last_active ?? null,
+            blood_group: row?.blood_group ?? null,
+            medical_history: row?.medical_history ?? null,
+            address: row?.address ?? null,
+            phone: row?.phone ?? null,
             created_at: user.createdAt,
             last_login_at: user.lastSignInAt ?? null,
         });
@@ -248,6 +254,47 @@ const listLiveVolunteers = async (req, res) => {
     }
 };
 
+// @desc    Update current user profile (personal details)
+// @route   PUT /api/users/me
+// @access  Private
+const updateMe = async (req, res) => {
+    try {
+        const uid = req.user.id;
+        const { blood_group, medical_history, address, phone } = req.body;
+
+        // 1. Update local DB
+        const result = await db.query(
+            `UPDATE users 
+             SET blood_group = COALESCE($1, blood_group),
+                 medical_history = COALESCE($2, medical_history),
+                 address = COALESCE($3, address),
+                 phone = COALESCE($4, phone),
+                 updated_at = NOW()
+             WHERE clerk_user_id = $5
+             RETURNING *`,
+            [blood_group || null, medical_history || null, address || null, phone || null, uid]
+        );
+
+        // 2. Sync to Clerk publicMetadata (optional but good for consistency)
+        await clerkClient.users.updateUserMetadata(uid, {
+            publicMetadata: {
+                blood_group,
+                medical_history,
+                address,
+                phone
+            }
+        });
+
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error('[500] updateMe error:', err?.message || err);
+        res.status(500).json({
+            message: 'Failed to update profile',
+            ...(process.env.NODE_ENV !== 'production' && { detail: err?.message }),
+        });
+    }
+};
+
 module.exports = {
     getMe,
     updateUserRole,
@@ -255,5 +302,6 @@ module.exports = {
     onboardUser,
     updateMyLocation,
     toggleMyAvailability,
-    listLiveVolunteers
+    listLiveVolunteers,
+    updateMe
 };

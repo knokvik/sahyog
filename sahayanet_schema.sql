@@ -48,13 +48,17 @@ CREATE TABLE users (
             'volunteer',
             'coordinator',
             'admin',
-            'organization'
+            'organization',
+            'user'
         )),
     organization_id uuid REFERENCES organizations(id) ON DELETE SET NULL,
     is_active boolean DEFAULT true,
     is_verified boolean DEFAULT false,
     current_location geometry(Point, 4326),
     avatar_url text, 
+    blood_group varchar(10),
+    medical_history text,
+    address text,
     last_active timestamp,
     created_at timestamp DEFAULT now(),
     updated_at timestamp DEFAULT now()

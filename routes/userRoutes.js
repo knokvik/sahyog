@@ -9,7 +9,8 @@ const {
     onboardUser,
     updateMyLocation,
     toggleMyAvailability,
-    listLiveVolunteers
+    listLiveVolunteers,
+    updateMe
 } = require('../controllers/userController');
 
 // All routes require Clerk Auth (verifyToken)
@@ -19,6 +20,7 @@ router.get('/', verifyToken, checkRole('org:admin'), listUsers);
 
 // GET /api/users/me - Get current user profile (syncs logic in checkRole)
 router.get('/me', verifyToken, checkRole(), getMe);
+router.put('/me', verifyToken, checkRole(), updateMe);
 router.put('/me/location', verifyToken, checkRole(), updateMyLocation);
 router.patch('/me/availability', verifyToken, checkRole(), toggleMyAvailability);
 router.get('/volunteers/live', verifyToken, checkRole('coordinator'), listLiveVolunteers);

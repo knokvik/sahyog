@@ -26,7 +26,8 @@ const checkRole = (requiredRole) => {
         'org:volunteer_head': 'coordinator',
         'org:coordinator': 'coordinator',
         'org:admin': 'admin',
-        'org:organization': 'organization'
+        'org:organization': 'organization',
+        'user': 'user'
       };
 
       const role = dbToAppRole[rawRole] || 'volunteer';

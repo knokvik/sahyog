@@ -114,17 +114,20 @@ async function listPendingTasks(req, res) {
 
     let queryText = `
       SELECT t.*, n.request_code AS need_code, n.location AS need_location,
-             u.full_name AS volunteer_name
+             ST_X(t.meeting_point::geometry) AS lng,
+             ST_Y(t.meeting_point::geometry) AS lat,
+             u.full_name AS volunteer_name, u2.full_name AS assigned_by_name
       FROM tasks t
       LEFT JOIN needs n ON t.need_id = n.id
       LEFT JOIN users u ON t.volunteer_id = u.id
+      LEFT JOIN users u2 ON t.assigned_by = u2.id
       WHERE t.status = ANY($1::text[])
     `;
 
     const params = [ACTIVE_STATUSES];
 
     if (role === 'volunteer') {
-      queryText += ' AND t.volunteer_id = $2';
+      queryText += ' AND (t.volunteer_id = $2 OR (t.volunteer_id IS NULL AND t.status = \'pending\'))';
       params.push(user.id);
     } else if (role === 'coordinator') {
       queryText += ' AND (t.assigned_by = $2 OR t.volunteer_id IS NOT NULL)';
@@ -147,7 +150,10 @@ async function listTaskHistory(req, res) {
     const role = req.role || user.role || 'volunteer';
 
     let queryText = `
-      SELECT t.*, u.full_name AS volunteer_name
+      SELECT t.*, 
+             ST_X(t.meeting_point::geometry) AS lng,
+             ST_Y(t.meeting_point::geometry) AS lat,
+             u.full_name AS volunteer_name
       FROM tasks t
       LEFT JOIN users u ON t.volunteer_id = u.id
       WHERE t.status = ANY($1::text[])
@@ -182,7 +188,10 @@ async function updateTaskStatus(req, res) {
     const task = await loadTask(id);
     if (!task) return res.status(404).json({ message: 'Task not found' });
 
-    if (role === 'volunteer' && task.volunteer_id !== currentUser.id) {
+    // Allow acceptance if it's currently unassigned and status is pending
+    if (status === 'accepted' && !task.volunteer_id && task.status === 'pending' && role === 'volunteer') {
+      // Allow this through - we will update volunteer_id as well
+    } else if (role === 'volunteer' && task.volunteer_id !== currentUser.id) {
       return res.status(403).json({ message: 'Volunteers can update only their own tasks' });
     }
 
@@ -209,6 +218,10 @@ async function updateTaskStatus(req, res) {
       updateFields.push('check_in_time = NOW()');
     } else if (status === 'accepted') {
       updateFields.push('completed_at = NULL');
+      if (!task.volunteer_id) {
+        updateFields.push(`volunteer_id = $${idx++}`);
+        values.push(currentUser.id);
+      }
     }
 
     if (updateFields.length === 0) {
@@ -350,6 +363,38 @@ async function getTaskVotes(req, res) {
   }
 }
 
+async function requestHelp(req, res) {
+  try {
+    const { id } = req.params;
+    const { note, type } = req.body;
+    const currentUser = req.dbUser || (await ensureUserInDb(req.auth?.userId));
+
+    const task = await loadTask(id);
+    if (!task) return res.status(404).json({ message: 'Task not found' });
+
+    // Create a "Need" linked to this task to request more help
+    const result = await db.query(
+      `INSERT INTO needs (request_code, reporter_name, reporter_phone, type, description, disaster_id, zone_id, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'unassigned')
+       RETURNING *`,
+      [
+        `HELP-${id.substring(0, 4)}-${Date.now().toString().slice(-4)}`,
+        currentUser.full_name,
+        currentUser.phone || '0000000000',
+        type || 'volunteer',
+        `Assistance requested for task "${task.title}": ${note || 'More hands needed'}`,
+        task.disaster_id,
+        task.zone_id,
+      ]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Error requesting help:', err);
+    res.status(500).json({ message: 'Failed to request help' });
+  }
+}
+
 module.exports = {
   createTask,
   listPendingTasks,
@@ -357,4 +402,5 @@ module.exports = {
   updateTaskStatus,
   voteTaskCompletion,
   getTaskVotes,
+  requestHelp,
 };
