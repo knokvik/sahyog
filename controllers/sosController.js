@@ -65,28 +65,39 @@ async function createSos(req, res) {
 // GET /api/v1/sos
 async function listSos(req, res) {
   try {
-    const role = req.role || 'org:user';
-    let queryText = 'SELECT * FROM sos_reports ORDER BY created_at DESC LIMIT 100';
+    const role = req.role || 'volunteer';
+
+    let queryText = `
+      SELECT s.*,
+             u.full_name AS volunteer_name,
+             d.name      AS disaster_name
+      FROM sos_alerts s
+      LEFT JOIN users u     ON u.id = s.volunteer_id
+      LEFT JOIN disasters d ON d.id = s.disaster_id
+      ORDER BY s.created_at DESC LIMIT 100`;
     let params = [];
 
-    if (role === 'org:user') {
-      // Regular users can only see their own SOS reports
-      const { userId } = req.auth || {};
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      queryText = 'SELECT * FROM sos_reports WHERE clerk_reporter_id = $1 ORDER BY created_at DESC';
-      params = [userId];
-    } else if (role === 'org:volunteer' || role === 'org:volunteer_head') {
-      // Volunteers see all unresolved reports sorted by priority
-      queryText =
-        'SELECT * FROM sos_reports WHERE status != $1 ORDER BY priority_score DESC NULLS LAST, created_at ASC LIMIT 100';
-      params = ['resolved'];
+    // Volunteers only see their own SOS alerts
+    if (role === 'volunteer') {
+      const dbUser = req.dbUser;
+      if (!dbUser) return res.status(401).json({ message: 'Unauthorized' });
+      queryText = `
+        SELECT s.*,
+               u.full_name AS volunteer_name,
+               d.name      AS disaster_name
+        FROM sos_alerts s
+        LEFT JOIN users u     ON u.id = s.volunteer_id
+        LEFT JOIN disasters d ON d.id = s.disaster_id
+        WHERE s.volunteer_id = $1
+        ORDER BY s.created_at DESC`;
+      params = [dbUser.id];
     }
 
     const result = await db.query(queryText, params);
     res.json(result.rows);
   } catch (err) {
     console.error('Error listing SOS:', err);
-    res.status(500).json({ message: 'Failed to list SOS reports' });
+    res.status(500).json({ message: 'Failed to list SOS alerts' });
   }
 }
 
