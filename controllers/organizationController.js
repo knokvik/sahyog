@@ -334,8 +334,7 @@ async function listOrgRequests(req, res) {
                     dr.id AS request_id, dr.status AS request_status, dr.notes, dr.created_at,
                     d.id AS disaster_id, d.name AS disaster_name, d.type AS disaster_type,
                     d.severity AS disaster_severity, d.status AS disaster_status,
-                    u.full_name AS requested_by,
-                    (SELECT c.full_name FROM disaster_coordinator_assignments dca JOIN users c ON c.id = dca.coordinator_id WHERE dca.disaster_id = d.id AND dca.organization_id = ora.organization_id LIMIT 1) as assigned_coordinator_name
+                    u.full_name AS requested_by
              FROM org_request_assignments ora
              JOIN disaster_requests dr ON dr.id = ora.request_id
              JOIN disasters d ON d.id = dr.disaster_id
@@ -345,13 +344,23 @@ async function listOrgRequests(req, res) {
             [orgId]
         );
 
-        // Attach items to each request
+        // Attach items and zones to each request
         for (const row of result.rows) {
             const items = await db.query(
                 'SELECT * FROM disaster_request_items WHERE request_id = $1',
                 [row.request_id]
             );
             row.items = items.rows;
+
+            const zones = await db.query(
+                `SELECT z.id, z.name, z.severity, z.radius_meters,
+                        (SELECT c.full_name FROM disaster_coordinator_assignments dca
+                         JOIN users c ON c.id = dca.coordinator_id
+                         WHERE dca.zone_id = z.id AND dca.organization_id = $1 LIMIT 1) as assigned_coordinator_name
+                 FROM zones z WHERE z.disaster_id = $2`,
+                [orgId, row.disaster_id]
+            );
+            row.zones = zones.rows;
         }
 
         res.json(result.rows);
@@ -460,8 +469,8 @@ async function assignCoordinator(req, res) {
         if (!orgId) return res.status(404).json({ message: 'No organization linked' });
 
         const { assignmentId } = req.params;
-        const { coordinator_id } = req.body;
-        if (!coordinator_id) return res.status(400).json({ message: 'coordinator_id required' });
+        const { coordinator_id, zone_id } = req.body;
+        if (!coordinator_id || !zone_id) return res.status(400).json({ message: 'coordinator_id and zone_id required' });
 
         // Get disaster_id from assignment
         const asn = await db.query(
@@ -474,19 +483,30 @@ async function assignCoordinator(req, res) {
         if (asn.rows.length === 0) return res.status(404).json({ message: 'Assignment not found' });
         const disasterId = asn.rows[0].disaster_id;
 
-        // Create coordinator assignment (first check if they are already assigned!)
+        // Verify the zone belongs to the disaster
+        const zoneCheck = await db.query(`SELECT id FROM zones WHERE id = $1 AND disaster_id = $2`, [zone_id, disasterId]);
+        if (zoneCheck.rows.length === 0) return res.status(400).json({ message: 'Invalid zone for this disaster' });
+
+        // Check if zone already has a coordinator for this org
+        const zoneAssignmentCheck = await db.query(
+            `SELECT id FROM disaster_coordinator_assignments WHERE zone_id = $1 AND organization_id = $2`,
+            [zone_id, orgId]
+        );
+        if (zoneAssignmentCheck.rows.length > 0) return res.status(400).json({ message: 'Zone already has a coordinator assigned' });
+
+        // Create coordinator assignment (check if they are already assigned!)
         const checkBusy = await db.query(
             `SELECT 1 FROM disaster_coordinator_assignments dca 
              JOIN disasters d ON d.id = dca.disaster_id
-             WHERE dca.coordinator_id = $1 AND dca.disaster_id != $2 AND d.status IN ('active', 'monitoring')`,
-            [coordinator_id, disasterId]
+             WHERE dca.coordinator_id = $1 AND d.status IN ('active', 'monitoring')`,
+            [coordinator_id]
         );
-        if (checkBusy.rows.length > 0) return res.status(400).json({ message: 'Coordinator is already assigned to another ongoing disaster' });
+        if (checkBusy.rows.length > 0) return res.status(400).json({ message: 'Coordinator is already assigned to a zone in an ongoing disaster' });
 
         await db.query(
-            `INSERT INTO disaster_coordinator_assignments (disaster_id, organization_id, coordinator_id)
-             VALUES ($1, $2, $3)`,
-            [disasterId, orgId, coordinator_id]
+            `INSERT INTO disaster_coordinator_assignments (disaster_id, zone_id, organization_id, coordinator_id)
+             VALUES ($1, $2, $3, $4)`,
+            [disasterId, zone_id, orgId, coordinator_id]
         );
 
         // Create volunteer assignments for coordinator's volunteers
@@ -497,9 +517,9 @@ async function assignCoordinator(req, res) {
 
         for (const vol of volunteers.rows) {
             await db.query(
-                `INSERT INTO volunteer_disaster_assignments (disaster_id, coordinator_id, volunteer_id)
-                 VALUES ($1, $2, $3)`,
-                [disasterId, coordinator_id, vol.id]
+                `INSERT INTO volunteer_disaster_assignments (disaster_id, zone_id, coordinator_id, volunteer_id)
+                 VALUES ($1, $2, $3, $4)`,
+                [disasterId, zone_id, coordinator_id, vol.id]
             );
         }
 
