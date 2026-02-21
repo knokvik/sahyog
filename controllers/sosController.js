@@ -69,6 +69,7 @@ async function listSos(req, res) {
 
     let queryText = `
       SELECT s.*,
+             ST_X(s.location) AS lng, ST_Y(s.location) AS lat,
              u.full_name AS volunteer_name,
              d.name      AS disaster_name
       FROM sos_alerts s
@@ -83,6 +84,7 @@ async function listSos(req, res) {
       if (!dbUser) return res.status(401).json({ message: 'Unauthorized' });
       queryText = `
         SELECT s.*,
+               ST_X(s.location) AS lng, ST_Y(s.location) AS lat,
                u.full_name AS volunteer_name,
                d.name      AS disaster_name
         FROM sos_alerts s
