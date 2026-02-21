@@ -317,6 +317,184 @@ async function createOrgResource(req, res) {
     }
 }
 
+// ─── GET /me/requests — incoming disaster requests for this org ─────
+async function listOrgRequests(req, res) {
+    try {
+        const orgId = await getOrgIdForUser(req.user.id);
+        if (!orgId) return res.status(404).json({ message: 'No organization linked' });
+
+        const result = await db.query(
+            `SELECT ora.id AS assignment_id, ora.status AS assignment_status, ora.responded_at,
+                    dr.id AS request_id, dr.status AS request_status, dr.notes, dr.created_at,
+                    d.id AS disaster_id, d.name AS disaster_name, d.type AS disaster_type,
+                    d.severity AS disaster_severity, d.status AS disaster_status,
+                    u.full_name AS requested_by
+             FROM org_request_assignments ora
+             JOIN disaster_requests dr ON dr.id = ora.request_id
+             JOIN disasters d ON d.id = dr.disaster_id
+             LEFT JOIN users u ON u.id = dr.created_by
+             WHERE ora.organization_id = $1
+             ORDER BY ora.created_at DESC`,
+            [orgId]
+        );
+
+        // Attach items to each request
+        for (const row of result.rows) {
+            const items = await db.query(
+                'SELECT * FROM disaster_request_items WHERE request_id = $1',
+                [row.request_id]
+            );
+            row.items = items.rows;
+        }
+
+        res.json(result.rows);
+    } catch (err) {
+        console.error('[500] listOrgRequests error:', err?.message || err);
+        res.status(500).json({ message: 'Failed to list requests' });
+    }
+}
+
+// ─── POST /me/requests/:assignmentId/accept — accept and commit resources ───
+async function acceptOrgRequest(req, res) {
+    try {
+        const orgId = await getOrgIdForUser(req.user.id);
+        if (!orgId) return res.status(404).json({ message: 'No organization linked' });
+
+        const { assignmentId } = req.params;
+        const { contributions } = req.body; // [{item_id, quantity_committed}]
+
+        if (!contributions || contributions.length === 0) {
+            return res.status(400).json({ message: 'Contributions are required' });
+        }
+
+        // Verify this assignment belongs to this org
+        const asnCheck = await db.query(
+            'SELECT * FROM org_request_assignments WHERE id = $1 AND organization_id = $2',
+            [assignmentId, orgId]
+        );
+        if (asnCheck.rows.length === 0) return res.status(404).json({ message: 'Assignment not found' });
+        if (asnCheck.rows[0].status !== 'pending') {
+            return res.status(400).json({ message: 'Already responded to this request' });
+        }
+
+        // Update assignment status
+        await db.query(
+            `UPDATE org_request_assignments SET status = 'accepted', responded_at = NOW() WHERE id = $1`,
+            [assignmentId]
+        );
+
+        // Insert contributions and update fulfilled quantities
+        for (const c of contributions) {
+            await db.query(
+                `INSERT INTO org_request_contributions (assignment_id, item_id, quantity_committed)
+                 VALUES ($1, $2, $3)`,
+                [assignmentId, c.item_id, c.quantity_committed]
+            );
+            await db.query(
+                `UPDATE disaster_request_items
+                 SET quantity_fulfilled = quantity_fulfilled + $1
+                 WHERE id = $2`,
+                [c.quantity_committed, c.item_id]
+            );
+        }
+
+        // Check if all items are fulfilled → auto-cancel remaining pending assignments
+        const requestId = asnCheck.rows[0].request_id;
+        const unfulfilledItems = await db.query(
+            `SELECT COUNT(*) FROM disaster_request_items
+             WHERE request_id = $1 AND quantity_fulfilled < quantity_needed`,
+            [requestId]
+        );
+
+        if (parseInt(unfulfilledItems.rows[0].count) === 0) {
+            // All fulfilled — cancel remaining pending assignments
+            await db.query(
+                `UPDATE org_request_assignments SET status = 'cancelled', responded_at = NOW()
+                 WHERE request_id = $1 AND status = 'pending'`,
+                [requestId]
+            );
+            await db.query(
+                `UPDATE disaster_requests SET status = 'fulfilled' WHERE id = $1`,
+                [requestId]
+            );
+        }
+
+        res.json({ message: 'Request accepted successfully' });
+    } catch (err) {
+        console.error('[500] acceptOrgRequest error:', err?.message || err);
+        res.status(500).json({ message: 'Failed to accept request' });
+    }
+}
+
+// ─── POST /me/requests/:assignmentId/reject ─────────────────────────
+async function rejectOrgRequest(req, res) {
+    try {
+        const orgId = await getOrgIdForUser(req.user.id);
+        if (!orgId) return res.status(404).json({ message: 'No organization linked' });
+
+        const { assignmentId } = req.params;
+        const result = await db.query(
+            `UPDATE org_request_assignments SET status = 'rejected', responded_at = NOW()
+             WHERE id = $1 AND organization_id = $2 AND status = 'pending' RETURNING id`,
+            [assignmentId, orgId]
+        );
+        if (result.rows.length === 0) return res.status(404).json({ message: 'Assignment not found or already responded' });
+        res.json({ message: 'Request rejected' });
+    } catch (err) {
+        console.error('[500] rejectOrgRequest error:', err?.message || err);
+        res.status(500).json({ message: 'Failed to reject request' });
+    }
+}
+
+// ─── POST /me/requests/:assignmentId/assign-coordinator ─────────────
+async function assignCoordinator(req, res) {
+    try {
+        const orgId = await getOrgIdForUser(req.user.id);
+        if (!orgId) return res.status(404).json({ message: 'No organization linked' });
+
+        const { assignmentId } = req.params;
+        const { coordinator_id } = req.body;
+        if (!coordinator_id) return res.status(400).json({ message: 'coordinator_id required' });
+
+        // Get disaster_id from assignment
+        const asn = await db.query(
+            `SELECT ora.request_id, dr.disaster_id
+             FROM org_request_assignments ora
+             JOIN disaster_requests dr ON dr.id = ora.request_id
+             WHERE ora.id = $1 AND ora.organization_id = $2`,
+            [assignmentId, orgId]
+        );
+        if (asn.rows.length === 0) return res.status(404).json({ message: 'Assignment not found' });
+        const disasterId = asn.rows[0].disaster_id;
+
+        // Create coordinator assignment
+        await db.query(
+            `INSERT INTO disaster_coordinator_assignments (disaster_id, organization_id, coordinator_id)
+             VALUES ($1, $2, $3)`,
+            [disasterId, orgId, coordinator_id]
+        );
+
+        // Create volunteer assignments for coordinator's volunteers
+        const volunteers = await db.query(
+            `SELECT id FROM users WHERE organization_id = $1 AND role = 'volunteer' AND is_active = true`,
+            [orgId]
+        );
+
+        for (const vol of volunteers.rows) {
+            await db.query(
+                `INSERT INTO volunteer_disaster_assignments (disaster_id, coordinator_id, volunteer_id)
+                 VALUES ($1, $2, $3)`,
+                [disasterId, coordinator_id, vol.id]
+            );
+        }
+
+        res.json({ message: 'Coordinator assigned, volunteers notified', volunteers_notified: volunteers.rows.length });
+    } catch (err) {
+        console.error('[500] assignCoordinator error:', err?.message || err);
+        res.status(500).json({ message: 'Failed to assign coordinator' });
+    }
+}
+
 module.exports = {
     registerOrg,
     getMyOrg,
@@ -329,4 +507,8 @@ module.exports = {
     createOrgResource,
     listOrgTasks,
     listOrgZones,
+    listOrgRequests,
+    acceptOrgRequest,
+    rejectOrgRequest,
+    assignCoordinator,
 };

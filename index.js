@@ -53,6 +53,7 @@ app.use('/api/v1/server', serverRoutes);
 app.use('/api/v1/search', searchRoutes);
 app.use('/api/v1/organizations', organizationRoutes);
 app.use('/api/v1/sos', sosRoutes);
+app.use('/api/v1/volunteer-assignments', require('./routes/volunteerAssignmentRoutes'));
 
 // Error Handling Middleware
 app.use(notFound);

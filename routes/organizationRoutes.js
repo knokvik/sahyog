@@ -14,10 +14,18 @@ const {
     createOrgResource,
     listOrgTasks,
     listOrgZones,
+    listOrgRequests,
+    acceptOrgRequest,
+    rejectOrgRequest,
+    assignCoordinator,
 } = require('../controllers/organizationController');
+const { listAllOrgs } = require('../controllers/disasterRequestController');
 
 // Registration — only requires auth (role will be set after registration)
 router.post('/register', verifyToken, registerOrg);
+
+// List all orgs (for admin to select when sending requests)
+router.get('/list', verifyToken, checkRole('admin'), listAllOrgs);
 
 // All /me routes require organization role
 router.get('/me', verifyToken, checkRole('organization'), getMyOrg);
@@ -38,5 +46,11 @@ router.get('/me/tasks', verifyToken, checkRole('organization'), listOrgTasks);
 
 // Zones where org is active
 router.get('/me/zones', verifyToken, checkRole('organization'), listOrgZones);
+
+// Disaster requests received by this org
+router.get('/me/requests', verifyToken, checkRole('organization'), listOrgRequests);
+router.post('/me/requests/:assignmentId/accept', verifyToken, checkRole('organization'), acceptOrgRequest);
+router.post('/me/requests/:assignmentId/reject', verifyToken, checkRole('organization'), rejectOrgRequest);
+router.post('/me/requests/:assignmentId/assign-coordinator', verifyToken, checkRole('organization'), assignCoordinator);
 
 module.exports = router;
