@@ -3,20 +3,19 @@ const { ensureUserInDb } = require('../utils/userSync');
 
 async function createTask(req, res) {
   try {
-    const { need_id, disaster_id, zone_id, volunteer_id, type, title, description, meeting_point } = req.body;
+    const { need_id, disaster_id, zone_id, volunteer_id, type, title, description, meeting_point, sosId } = req.body;
 
     if (!type || !title) return res.status(400).json({ message: 'Missing required fields' });
 
-    const { userId } = req.auth || {};
-    const adminUser = await ensureUserInDb(userId);
+    const adminUser = req.dbUser || await ensureUserInDb(req.auth?.userId);
 
     const locString = meeting_point ? `POINT(${meeting_point.lng} ${meeting_point.lat})` : null;
 
     const result = await db.query(
-      `INSERT INTO tasks (need_id, disaster_id, zone_id, volunteer_id, assigned_by, type, title, description, meeting_point)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CASE WHEN $9::text IS NOT NULL THEN ST_GeogFromText($9::text)::geography ELSE NULL END)
+      `INSERT INTO tasks (need_id, disaster_id, zone_id, volunteer_id, assigned_by, type, title, description, meeting_point, sos_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CASE WHEN $9::text IS NOT NULL THEN ST_GeomFromText($9::text, 4326) ELSE NULL END, $10)
        RETURNING *`,
-      [need_id || null, disaster_id || null, zone_id || null, volunteer_id || null, adminUser.id, type, title, description || null, locString]
+      [need_id || null, disaster_id || null, zone_id || null, volunteer_id || null, adminUser.id, type, title, description || null, locString, sosId || null]
     );
 
     res.status(201).json(result.rows[0]);

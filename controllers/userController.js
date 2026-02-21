@@ -90,9 +90,13 @@ const updateUserRole = async (req, res) => {
 const listUsers = async (req, res) => {
     try {
         const result = await db.query(
-            `SELECT id, clerk_user_id, full_name, email, role, phone, avatar_url, created_at, updated_at
-             FROM users
-             ORDER BY created_at DESC
+            `SELECT u.id, u.clerk_user_id, u.full_name, u.email, u.role, u.phone, u.avatar_url, u.created_at, u.updated_at,
+                    EXISTS(
+                      SELECT 1 FROM tasks t 
+                      WHERE t.volunteer_id = u.id AND t.status IN ('pending', 'in_progress')
+                    ) AS is_assigned
+             FROM users u
+             ORDER BY u.created_at DESC
              LIMIT 200`
         );
         res.json(result.rows);

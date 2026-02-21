@@ -218,8 +218,7 @@ async function getTasksForSos(req, res) {
     const result = await db.query(
       `SELECT t.*, u.full_name as volunteer_name, u.avatar_url as volunteer_avatar
        FROM tasks t
-       JOIN volunteers v ON t.volunteer_id = v.id
-       JOIN users u ON v.user_id = u.id
+       JOIN users u ON t.volunteer_id = u.id
        WHERE t.sos_id = $1
        ORDER BY t.created_at ASC`,
       [id]
