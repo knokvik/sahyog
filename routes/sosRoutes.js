@@ -19,6 +19,7 @@ router.get('/:id/tasks', verifyToken, checkRole(), validators.uuidParam, sosCont
 
 // Status changes - authorization checked in controller
 router.patch('/:id/status', verifyToken, checkRole(), validators.updateSosStatus, sosController.updateSosStatus);
+router.put('/:id/cancel', verifyToken, sosController.cancelSos);
 
 module.exports = router;
 

@@ -89,27 +89,17 @@ async function listSos(req, res) {
       SELECT s.*,
              ST_X(s.location::geometry) AS lng, ST_Y(s.location::geometry) AS lat,
              u.full_name AS volunteer_name,
+             u.phone AS reporter_phone,
              d.name      AS disaster_name
       FROM sos_alerts s
-      LEFT JOIN users u     ON u.id = s.acknowledged_by
+      LEFT JOIN users u     ON u.id = s.reporter_id OR u.id = s.acknowledged_by
       LEFT JOIN disasters d ON d.id = s.disaster_id`;
 
+    // Global broadcast: Everyone sees every SOS.
     let params = [];
 
-    // Filter logic based on role
-    if (role === 'volunteer') {
-      // Volunteers might only see alerts they are involved in or all alerts if they need to respond
-      // For now, let's keep it to their own created or assigned alerts
-      queryText += ` WHERE s.reporter_id = $1 OR s.acknowledged_by = $1`;
-      params = [dbUser.id];
-    } else if (role === 'user') {
-      // Citizens only see their own reports
-      queryText += ` WHERE s.reporter_id = $1`;
-      params = [dbUser.id];
-    }
-    // Coordinators see everything in the initial SQL (no WHERE)
-
-    queryText += ` ORDER BY s.created_at DESC LIMIT 100`;
+    // Only fetch active, non-cancelled/non-resolved ones by default for the map
+    queryText += ` WHERE s.status NOT IN ('cancelled', 'resolved') ORDER BY s.created_at DESC LIMIT 100`;
 
     const result = await db.query(queryText, params);
     res.json(result.rows);
@@ -248,6 +238,55 @@ async function getTasksForSos(req, res) {
   }
 }
 
+// PUT /api/v1/sos/:id/cancel
+async function cancelSos(req, res) {
+  try {
+    const { id } = req.params;
+    const { userId } = req.auth || {};
+
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+    // Verify ownership
+    const sosResult = await db.query(
+      `SELECT clerk_reporter_id FROM sos_alerts WHERE id = $1`,
+      [id]
+    );
+
+    if (sosResult.rows.length === 0) {
+      return res.status(404).json({ message: 'SOS alert not found' });
+    }
+
+    const sos = sosResult.rows[0];
+    const isAdminOrHead = ['admin', 'coordinator'].includes(req.role);
+
+    // Only the reporter or an admin can outright cancel an SOS
+    if (sos.clerk_reporter_id !== userId && !isAdminOrHead) {
+      return res.status(403).json({ message: 'You can only cancel your own SOS alerts' });
+    }
+
+    const cancelResult = await db.query(
+      `UPDATE sos_alerts
+       SET status = 'cancelled', resolved_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [id]
+    );
+
+    const updatedAlert = cancelResult.rows[0];
+
+    // Emit resolution event
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('sos_resolved', { id: updatedAlert.id });
+    }
+
+    res.json(updatedAlert);
+  } catch (err) {
+    console.error('Error cancelling SOS:', err);
+    res.status(500).json({ message: 'Failed to cancel SOS' });
+  }
+}
+
 module.exports = {
   createSos,
   listSos,
@@ -255,4 +294,5 @@ module.exports = {
   updateSosStatus,
   getNearbySos,
   getTasksForSos,
+  cancelSos,
 };
