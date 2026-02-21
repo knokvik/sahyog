@@ -11,6 +11,7 @@ const {
     linkVolunteer,
     unlinkVolunteer,
     listOrgResources,
+    createOrgResource,
     listOrgTasks,
     listOrgZones,
 } = require('../controllers/organizationController');
@@ -30,6 +31,7 @@ router.delete('/me/volunteers/:userId', verifyToken, checkRole('organization'), 
 
 // Resources scoped to org
 router.get('/me/resources', verifyToken, checkRole('organization'), listOrgResources);
+router.post('/me/resources', verifyToken, checkRole('organization'), createOrgResource);
 
 // Tasks scoped to org's volunteers
 router.get('/me/tasks', verifyToken, checkRole('organization'), listOrgTasks);

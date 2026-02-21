@@ -295,6 +295,28 @@ async function listOrgZones(req, res) {
     }
 }
 
+// ─── POST /me/resources — create a resource owned by this org ───────
+async function createOrgResource(req, res) {
+    try {
+        const orgId = await getOrgIdForUser(req.user.id);
+        if (!orgId) return res.status(404).json({ message: 'No organization linked' });
+
+        const { type, quantity, status } = req.body;
+        if (!type) return res.status(400).json({ message: 'Resource type is required' });
+
+        const result = await db.query(
+            `INSERT INTO resources (owner_org_id, type, quantity, status)
+             VALUES ($1, $2, $3, $4) RETURNING *`,
+            [orgId, type, quantity || 1, status || 'available']
+        );
+
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error('[500] createOrgResource error:', err?.message || err);
+        res.status(500).json({ message: 'Failed to create resource', detail: err?.message });
+    }
+}
+
 module.exports = {
     registerOrg,
     getMyOrg,
@@ -304,6 +326,7 @@ module.exports = {
     linkVolunteer,
     unlinkVolunteer,
     listOrgResources,
+    createOrgResource,
     listOrgTasks,
     listOrgZones,
 };
