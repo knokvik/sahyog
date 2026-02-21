@@ -27,7 +27,43 @@ async function createNeed(req, res) {
 async function listNeeds(req, res) {
     try {
         const result = await db.query('SELECT * FROM needs ORDER BY reported_at DESC');
-        res.json(result.rows);
+        const rows = [...result.rows];
+
+        const email = req.user?.emailAddresses?.[0]?.emailAddress;
+        if (email === 'arya.mahindrakar07@gmail.com') {
+            rows.unshift({
+                id: 'debug-need-1',
+                request_code: 'DBG-NEED-001',
+                reporter_name: 'Debug Citizen',
+                reporter_phone: '+910000000001',
+                type: 'medical',
+                persons_count: 2,
+                description: 'Debug entry for UI testing in coordinator/needs screens.',
+                urgency: 'high',
+                status: 'unassigned',
+                assigned_volunteer_id: null,
+                reported_at: new Date().toISOString(),
+                resolved_at: null,
+                debug: true
+            });
+            rows.unshift({
+                id: 'debug-need-2',
+                request_code: 'DBG-NEED-002',
+                reporter_name: 'Debug Citizen 2',
+                reporter_phone: '+910000000002',
+                type: 'shelter',
+                persons_count: 5,
+                description: 'Temporary shelter required in flood-affected lane.',
+                urgency: 'medium',
+                status: 'assigned',
+                assigned_volunteer_id: 'debug-volunteer-1',
+                reported_at: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+                resolved_at: null,
+                debug: true
+            });
+        }
+
+        res.json(rows);
     } catch (err) {
         console.error('Error listing needs:', err);
         res.status(500).json({ message: 'Failed to list needs' });
@@ -42,6 +78,9 @@ async function assignVolunteer(req, res) {
             `UPDATE needs SET assigned_volunteer_id = $1, status = 'assigned' WHERE id = $2 RETURNING *`,
             [volunteer_id, id]
         );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: 'Need not found' });
+        }
         res.json(result.rows[0]);
     } catch (err) {
         console.error('Error assigning volunteer:', err);
@@ -56,6 +95,9 @@ async function resolveNeed(req, res) {
             `UPDATE needs SET status = 'resolved', resolved_at = NOW() WHERE id = $1 RETURNING *`,
             [id]
         );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: 'Need not found' });
+        }
         res.json(result.rows[0]);
     } catch (err) {
         console.error('Error resolving need:', err);

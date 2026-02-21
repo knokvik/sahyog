@@ -45,6 +45,7 @@ app.use('/api/users', userRoutes);
 // v1 API as per spec
 app.use('/api/v1/needs', needRoutes);
 app.use('/api/v1/zones', zoneRoutes);
+app.use('/api/v1/coordinator', require('./routes/coordinatorRoutes'));
 app.use('/api/v1/tasks', taskRoutes);
 app.use('/api/v1/disasters', disasterRoutes);
 app.use('/api/v1/resources', resourceRoutes);

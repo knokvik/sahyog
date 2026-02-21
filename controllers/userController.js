@@ -15,7 +15,7 @@ const getMe = async (req, res) => {
 
         // Look up the DB role and organization (source of truth)
         const dbUser = await db.query(
-            `SELECT u.role, u.organization_id, o.name as organization_name
+            `SELECT u.role, u.organization_id, u.is_active, u.last_active, o.name as organization_name
              FROM users u
              LEFT JOIN organizations o ON u.organization_id = o.id
              WHERE u.clerk_user_id = $1`,
@@ -31,6 +31,8 @@ const getMe = async (req, res) => {
             role: dbRole,
             organization_id: orgId,
             organization_name: orgName,
+            is_active: dbUser.rows[0]?.is_active ?? true,
+            last_active: dbUser.rows[0]?.last_active ?? null,
             created_at: user.createdAt,
             last_login_at: user.lastSignInAt ?? null,
         });
@@ -149,9 +151,109 @@ const onboardUser = async (req, res) => {
     }
 };
 
+// @desc    Update current user's location
+// @route   PUT /api/users/me/location
+// @access  Private
+const updateMyLocation = async (req, res) => {
+    try {
+        const { lat, lng } = req.body || {};
+        const latitude = Number(lat);
+        const longitude = Number(lng);
+
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+            return res.status(400).json({ message: 'lat and lng must be valid numbers' });
+        }
+
+        const dbUser = req.dbUser || await ensureUserInDb(req.auth?.userId);
+
+        const result = await db.query(
+            `UPDATE users
+             SET current_location = ST_SetSRID(ST_MakePoint($1, $2), 4326),
+                 last_active = NOW(),
+                 updated_at = NOW()
+             WHERE id = $3
+             RETURNING id, full_name, is_active, last_active,
+               ST_X(current_location::geometry) AS lng,
+               ST_Y(current_location::geometry) AS lat`,
+            [longitude, latitude, dbUser.id]
+        );
+
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error('[500] updateMyLocation error:', err?.message || err);
+        res.status(500).json({
+            message: 'Failed to update location',
+            ...(process.env.NODE_ENV !== 'production' && { detail: err?.message }),
+        });
+    }
+};
+
+// @desc    Toggle volunteer availability (users.is_active)
+// @route   PATCH /api/users/me/availability
+// @access  Private (Volunteer/Coordinator/Admin)
+const toggleMyAvailability = async (req, res) => {
+    try {
+        const dbUser = req.dbUser || await ensureUserInDb(req.auth?.userId);
+        const role = req.role || dbUser.role || 'volunteer';
+
+        if (!['volunteer', 'coordinator', 'admin'].includes(role)) {
+            return res.status(403).json({ message: 'Only volunteers/coordinators can change availability' });
+        }
+
+        const hasExplicit = typeof req.body?.is_active === 'boolean';
+        const result = await db.query(
+            `UPDATE users
+             SET is_active = ${hasExplicit ? '$1' : 'NOT is_active'},
+                 last_active = NOW(),
+                 updated_at = NOW()
+             WHERE id = $${hasExplicit ? '2' : '1'}
+             RETURNING id, full_name, role, is_active, last_active`,
+            hasExplicit ? [req.body.is_active, dbUser.id] : [dbUser.id]
+        );
+
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error('[500] toggleMyAvailability error:', err?.message || err);
+        res.status(500).json({
+            message: 'Failed to update availability',
+            ...(process.env.NODE_ENV !== 'production' && { detail: err?.message }),
+        });
+    }
+};
+
+// @desc    List volunteers with live status for coordinator
+// @route   GET /api/users/volunteers/live
+// @access  Private (Coordinator/Admin)
+const listLiveVolunteers = async (req, res) => {
+    try {
+        const result = await db.query(
+            `SELECT u.id, u.full_name, u.email, u.phone, u.avatar_url,
+                    u.is_active, u.last_active,
+                    COUNT(t.id) FILTER (WHERE t.status IN ('pending', 'accepted', 'in_progress'))::int AS active_tasks,
+                    COUNT(t.id) FILTER (WHERE t.status = 'completed')::int AS completed_tasks
+             FROM users u
+             LEFT JOIN tasks t ON t.volunteer_id = u.id
+             WHERE u.role = 'volunteer'
+             GROUP BY u.id
+             ORDER BY u.is_active DESC, u.last_active DESC NULLS LAST, u.created_at DESC
+             LIMIT 500`
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error('[500] listLiveVolunteers error:', err?.message || err);
+        res.status(500).json({
+            message: 'Failed to list live volunteer status',
+            ...(process.env.NODE_ENV !== 'production' && { detail: err?.message }),
+        });
+    }
+};
+
 module.exports = {
     getMe,
     updateUserRole,
     listUsers,
-    onboardUser
+    onboardUser,
+    updateMyLocation,
+    toggleMyAvailability,
+    listLiveVolunteers
 };

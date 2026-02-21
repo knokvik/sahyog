@@ -5,8 +5,11 @@ const taskController = require('../controllers/taskController');
 
 const router = express.Router();
 
-router.post('/', verifyToken, checkRole('coordinator'), taskController.createTask);
+router.post('/', verifyToken, checkRole(), taskController.createTask);
 router.get('/pending', verifyToken, checkRole(), taskController.listPendingTasks);
+router.get('/history', verifyToken, checkRole(), taskController.listTaskHistory);
+router.post('/:id/vote-completion', verifyToken, checkRole(), taskController.voteTaskCompletion);
+router.get('/:id/votes', verifyToken, checkRole(), taskController.getTaskVotes);
 router.patch('/:id/status', verifyToken, checkRole(), taskController.updateTaskStatus);
 
 module.exports = router;

@@ -20,8 +20,9 @@ router.get('/:id/stats', verifyToken, checkRole('admin'), validators.uuidParam, 
 router.get('/:id/tasks', verifyToken, checkRole('admin'), validators.uuidParam, disasterController.getDisasterTasks);
 
 // Relief coordination — zones
+// Relief coordination — zones
 router.post('/:id/relief-zones', verifyToken, checkRole('admin'), drController.createZone);
-router.get('/:id/relief-zones', verifyToken, checkRole(), drController.listZones);
+router.get('/:id/relief-zones', verifyToken, drController.listZones);
 router.delete('/:id/relief-zones/:zoneId', verifyToken, checkRole('admin'), drController.deleteZone);
 
 // Relief coordination — resource requests

@@ -7,6 +7,6 @@ const router = express.Router();
 
 router.post('/', missingPersonController.reportMissingPerson); // Public API possible
 router.get('/', verifyToken, checkRole(), missingPersonController.listMissingPersons);
-router.patch('/:id/found', verifyToken, checkRole('admin'), missingPersonController.markFound);
+router.patch('/:id/found', verifyToken, checkRole(), missingPersonController.markFound);
 
 module.exports = router;
