@@ -91,6 +91,8 @@ const listUsers = async (req, res) => {
     try {
         const result = await db.query(
             `SELECT u.id, u.clerk_user_id, u.full_name, u.email, u.role, u.phone, u.avatar_url, u.created_at, u.updated_at,
+                    ST_X(u.current_location::geometry) AS lng, 
+                    ST_Y(u.current_location::geometry) AS lat,
                     EXISTS(
                       SELECT 1 FROM tasks t 
                       WHERE t.volunteer_id = u.id AND t.status IN ('pending', 'in_progress')
