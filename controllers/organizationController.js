@@ -153,9 +153,12 @@ async function listOrgVolunteers(req, res) {
         if (!orgId) return res.status(404).json({ message: 'No organization linked' });
 
         const result = await db.query(
-            `SELECT id, clerk_user_id, full_name, email, phone, role, is_active, avatar_url, created_at
-             FROM users WHERE organization_id = $1 AND role != 'organization'
-             ORDER BY created_at DESC`,
+            `SELECT u.id, u.clerk_user_id, u.full_name, u.email, u.phone, u.role, u.is_active, u.avatar_url, u.created_at,
+             EXISTS(SELECT 1 FROM disaster_coordinator_assignments dca 
+                    JOIN disasters d ON d.id = dca.disaster_id
+                    WHERE dca.coordinator_id = u.id AND d.status IN ('active', 'monitoring')) as is_assigned
+             FROM users u WHERE u.organization_id = $1 AND u.role != 'organization'
+             ORDER BY u.created_at DESC`,
             [orgId]
         );
         res.json(result.rows);
@@ -273,18 +276,21 @@ async function listOrgZones(req, res) {
         if (!orgId) return res.status(404).json({ message: 'No organization linked' });
 
         const result = await db.query(
-            `SELECT DISTINCT z.*, d.name as disaster_name,
+            `SELECT z.*, d.name as disaster_name,
+                ST_X(z.center::geometry) as center_lng,
+                ST_Y(z.center::geometry) as center_lat,
                 (SELECT COUNT(*) FROM users u WHERE u.organization_id = $1
                  AND EXISTS(SELECT 1 FROM tasks t WHERE t.volunteer_id = u.id AND t.zone_id = z.id)) as org_volunteers,
-                (SELECT COUNT(*) FROM resources r WHERE r.owner_org_id = $1 AND r.current_zone_id = z.id) as org_resources
+                (SELECT COUNT(*) FROM resources r WHERE r.owner_org_id = $1 AND r.current_zone_id = z.id) as org_resources,
+                EXISTS (
+                    SELECT 1 FROM resources r WHERE r.owner_org_id = $1 AND r.current_zone_id = z.id
+                ) OR EXISTS (
+                    SELECT 1 FROM tasks t JOIN users u ON t.volunteer_id = u.id
+                    WHERE u.organization_id = $1 AND t.zone_id = z.id
+                ) as is_assigned
              FROM zones z
              JOIN disasters d ON z.disaster_id = d.id
-             WHERE EXISTS (
-                SELECT 1 FROM resources r WHERE r.owner_org_id = $1 AND r.current_zone_id = z.id
-             ) OR EXISTS (
-                SELECT 1 FROM tasks t JOIN users u ON t.volunteer_id = u.id
-                WHERE u.organization_id = $1 AND t.zone_id = z.id
-             )
+             WHERE d.status = 'active'
              ORDER BY z.created_at DESC`,
             [orgId]
         );
@@ -328,7 +334,8 @@ async function listOrgRequests(req, res) {
                     dr.id AS request_id, dr.status AS request_status, dr.notes, dr.created_at,
                     d.id AS disaster_id, d.name AS disaster_name, d.type AS disaster_type,
                     d.severity AS disaster_severity, d.status AS disaster_status,
-                    u.full_name AS requested_by
+                    u.full_name AS requested_by,
+                    (SELECT c.full_name FROM disaster_coordinator_assignments dca JOIN users c ON c.id = dca.coordinator_id WHERE dca.disaster_id = d.id AND dca.organization_id = ora.organization_id LIMIT 1) as assigned_coordinator_name
              FROM org_request_assignments ora
              JOIN disaster_requests dr ON dr.id = ora.request_id
              JOIN disasters d ON d.id = dr.disaster_id
@@ -467,7 +474,15 @@ async function assignCoordinator(req, res) {
         if (asn.rows.length === 0) return res.status(404).json({ message: 'Assignment not found' });
         const disasterId = asn.rows[0].disaster_id;
 
-        // Create coordinator assignment
+        // Create coordinator assignment (first check if they are already assigned!)
+        const checkBusy = await db.query(
+            `SELECT 1 FROM disaster_coordinator_assignments dca 
+             JOIN disasters d ON d.id = dca.disaster_id
+             WHERE dca.coordinator_id = $1 AND dca.disaster_id != $2 AND d.status IN ('active', 'monitoring')`,
+            [coordinator_id, disasterId]
+        );
+        if (checkBusy.rows.length > 0) return res.status(400).json({ message: 'Coordinator is already assigned to another ongoing disaster' });
+
         await db.query(
             `INSERT INTO disaster_coordinator_assignments (disaster_id, organization_id, coordinator_id)
              VALUES ($1, $2, $3)`,
