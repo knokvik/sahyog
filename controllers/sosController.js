@@ -11,7 +11,7 @@ async function createSos(req, res) {
     }
 
     const user = await ensureUserInDb(userId);
-    const { lat: rawLat, lng: rawLng, type, description, mediaUrls, disasterId, peopleCount, hasVulnerable, client_uuid } = req.body;
+    const { lat: rawLat, lng: rawLng, type, description, mediaUrls, disasterId, peopleCount, hasVulnerable, client_uuid, source, hop_count } = req.body;
 
     // Accept both number and string-encoded numbers (SQLite serialises floats as strings)
     const lat = typeof rawLat === 'number' ? rawLat : parseFloat(rawLat);
@@ -37,7 +37,7 @@ async function createSos(req, res) {
       // This ensures idempotent retry from the offline sync engine.
       result = await db.query(
         `INSERT INTO sos_alerts
-         (reporter_id, clerk_reporter_id, disaster_id, location, type, description, priority_score, status, media_urls, created_at, client_uuid)
+         (reporter_id, clerk_reporter_id, disaster_id, location, type, description, priority_score, status, media_urls, created_at, client_uuid, source, hop_count)
          VALUES (
            $1,
            $2,
@@ -49,13 +49,17 @@ async function createSos(req, res) {
            'triggered',
            $9,
            $10,
-           $11
+           $11,
+           $12,
+           $13
          )
          ON CONFLICT (client_uuid) DO UPDATE SET
            location = ST_SetSRID(ST_MakePoint($4, $5), 4326),
            type = COALESCE(EXCLUDED.type, sos_alerts.type),
            description = COALESCE(EXCLUDED.description, sos_alerts.description),
-           priority_score = EXCLUDED.priority_score
+           priority_score = EXCLUDED.priority_score,
+           source = EXCLUDED.source,
+           hop_count = LEAST(EXCLUDED.hop_count, sos_alerts.hop_count)
          RETURNING *`,
         [
           user.id,
@@ -69,6 +73,8 @@ async function createSos(req, res) {
           mediaUrls || [],
           now,
           client_uuid,
+          source || 'direct',
+          parseInt(hop_count) || 0,
         ]
       );
     } else {
