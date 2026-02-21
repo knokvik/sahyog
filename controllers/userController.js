@@ -184,7 +184,23 @@ const updateMyLocation = async (req, res) => {
             [longitude, latitude, dbUser.id]
         );
 
-        res.json(result.rows[0]);
+        const updatedUser = result.rows[0];
+
+        // Emit location update for the Live Map
+        const io = req.app.get('io');
+        if (io) {
+            io.emit('volunteer_location_update', {
+                id: updatedUser.id,
+                full_name: updatedUser.full_name,
+                role: dbUser.role,
+                lat: updatedUser.lat,
+                lng: updatedUser.lng,
+                is_active: updatedUser.is_active,
+                last_active: updatedUser.last_active
+            });
+        }
+
+        res.json(updatedUser);
     } catch (err) {
         console.error('[500] updateMyLocation error:', err?.message || err);
         res.status(500).json({

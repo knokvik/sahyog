@@ -72,24 +72,6 @@ async function getTasks(req, res) {
     try {
         const result = await db.query(
             `SELECT t.*, 
-                    ST_X(t.meeting_point::geometry) AS lat, -- Note: legacy naming or specific convention check
-                    ST_Y(t.meeting_point::geometry) AS lng, 
-                    u.full_name AS volunteer_name
-             FROM tasks t
-             LEFT JOIN users u ON t.volunteer_id = u.id
-             ORDER BY t.created_at DESC
-             LIMIT 200`
-        );
-        // Correcting lat/lng order to match common usage if needed, 
-        // but MapTab uses parseLat/parseLng so let's be explicit.
-        const rows = result.rows.map(r => ({
-            ...r,
-            lat: r.lng, // Wait, ST_X is usually lng, ST_Y is lat.
-            lng: r.lat
-        }));
-        // Actually, let's just use clearer aliases in SQL.
-        const correctedResult = await db.query(
-            `SELECT t.*, 
                     ST_X(t.meeting_point::geometry) AS lng,
                     ST_Y(t.meeting_point::geometry) AS lat,
                     u.full_name AS volunteer_name
@@ -98,7 +80,7 @@ async function getTasks(req, res) {
              ORDER BY t.created_at DESC
              LIMIT 200`
         );
-        res.json(correctedResult.rows);
+        res.json(result.rows);
     } catch (err) {
         console.error('[coordinator/tasks] error:', err);
         res.status(500).json({ message: 'Failed to fetch tasks' });
@@ -201,20 +183,24 @@ async function getNeeds(req, res) {
 // GET /api/v1/coordinator/sos
 async function getSos(req, res) {
     try {
+        console.log('[coordinator/sos] Fetching SOS alerts...');
         const result = await db.query(
             `SELECT s.*, 
                     ST_X(s.location::geometry) AS lng,
                     ST_Y(s.location::geometry) AS lat,
-                    u.full_name AS volunteer_name
-       FROM sos_alerts s
-       LEFT JOIN users u ON s.volunteer_id = u.id
-       ORDER BY s.created_at DESC
-       LIMIT 200`
+                    COALESCE(rep.full_name, 'Unknown Reporter') AS reporter_name,
+                    COALESCE(rep.phone, 'No Phone') AS reporter_phone,
+                    COALESCE(ack.full_name, 'Unassigned') AS volunteer_name
+             FROM sos_alerts s
+             LEFT JOIN users rep ON s.reporter_id = rep.id
+             LEFT JOIN users ack ON s.acknowledged_by = ack.id
+             ORDER BY s.created_at DESC
+             LIMIT 200`
         );
         res.json(result.rows);
     } catch (err) {
-        console.error('[coordinator/sos] error:', err);
-        res.status(500).json({ message: 'Failed to fetch SOS alerts' });
+        console.error('[coordinator/sos] Error details:', err.message, err.stack);
+        res.status(500).json({ message: 'Failed to fetch SOS alerts', error: err.message });
     }
 }
 
