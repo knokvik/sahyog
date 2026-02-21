@@ -11,10 +11,14 @@ async function createSos(req, res) {
     }
 
     const user = await ensureUserInDb(userId);
-    const { lat, lng, type, description, mediaUrls, disasterId, peopleCount, hasVulnerable } = req.body;
+    const { lat: rawLat, lng: rawLng, type, description, mediaUrls, disasterId, peopleCount, hasVulnerable, client_uuid } = req.body;
 
-    if (typeof lat !== 'number' || typeof lng !== 'number') {
-      return res.status(400).json({ message: 'lat and lng are required numbers' });
+    // Accept both number and string-encoded numbers (SQLite serialises floats as strings)
+    const lat = typeof rawLat === 'number' ? rawLat : parseFloat(rawLat);
+    const lng = typeof rawLng === 'number' ? rawLng : parseFloat(rawLng);
+
+    if (isNaN(lat) || isNaN(lng)) {
+      return res.status(400).json({ message: 'lat and lng must be valid numbers' });
     }
 
     const now = new Date();
@@ -25,39 +29,84 @@ async function createSos(req, res) {
       createdAt: now,
     });
 
-    const result = await db.query(
-      `INSERT INTO sos_alerts
-       (reporter_id, clerk_reporter_id, disaster_id, location, type, description, priority_score, status, media_urls, created_at)
-       VALUES (
-         $1,
-         $2,
-         $3,
-         ST_SetSRID(ST_MakePoint($4, $5), 4326),
-         $6,
-         $7,
-         $8,
-         'triggered',
-         $9,
-         $10
-       )
-       RETURNING *`,
-      [
-        user.id,
-        user.clerk_user_id,
-        disasterId || null,
-        lng,
-        lat,
-        type || null,
-        description || null,
-        priority,
-        mediaUrls || [],
-        now,
-      ]
-    );
+    let result;
+
+    if (client_uuid) {
+      // ── UPSERT mode: Exactly-once delivery ──
+      // If client_uuid already exists, update the existing record instead of creating a duplicate.
+      // This ensures idempotent retry from the offline sync engine.
+      result = await db.query(
+        `INSERT INTO sos_alerts
+         (reporter_id, clerk_reporter_id, disaster_id, location, type, description, priority_score, status, media_urls, created_at, client_uuid)
+         VALUES (
+           $1,
+           $2,
+           $3,
+           ST_SetSRID(ST_MakePoint($4, $5), 4326),
+           $6,
+           $7,
+           $8,
+           'triggered',
+           $9,
+           $10,
+           $11
+         )
+         ON CONFLICT (client_uuid) DO UPDATE SET
+           location = ST_SetSRID(ST_MakePoint($4, $5), 4326),
+           type = COALESCE(EXCLUDED.type, sos_alerts.type),
+           description = COALESCE(EXCLUDED.description, sos_alerts.description),
+           priority_score = EXCLUDED.priority_score
+         RETURNING *`,
+        [
+          user.id,
+          user.clerk_user_id,
+          disasterId || null,
+          lng,
+          lat,
+          type || null,
+          description || null,
+          priority,
+          mediaUrls || [],
+          now,
+          client_uuid,
+        ]
+      );
+    } else {
+      // ── Legacy mode: No client_uuid, standard insert ──
+      result = await db.query(
+        `INSERT INTO sos_alerts
+         (reporter_id, clerk_reporter_id, disaster_id, location, type, description, priority_score, status, media_urls, created_at)
+         VALUES (
+           $1,
+           $2,
+           $3,
+           ST_SetSRID(ST_MakePoint($4, $5), 4326),
+           $6,
+           $7,
+           $8,
+           'triggered',
+           $9,
+           $10
+         )
+         RETURNING *`,
+        [
+          user.id,
+          user.clerk_user_id,
+          disasterId || null,
+          lng,
+          lat,
+          type || null,
+          description || null,
+          priority,
+          mediaUrls || [],
+          now,
+        ]
+      );
+    }
 
     const emittedAlert = result.rows[0];
 
-    // Emit real-time socket event
+    // Emit real-time socket event — include flat lat/lng for the Live Map
     const io = req.app.get('io');
     if (io) {
       io.emit('new_sos_alert', {
@@ -65,15 +114,19 @@ async function createSos(req, res) {
         reporter_name: user.full_name,
         reporter_phone: user.phone,
         type: emittedAlert.type,
+        status: emittedAlert.status,
+        lat,
+        lng,
         location: emittedAlert.location,
-        priority: emittedAlert.priority_score
+        priority: emittedAlert.priority_score,
+        created_at: emittedAlert.created_at,
       });
     }
 
     res.status(201).json(emittedAlert);
   } catch (err) {
-    console.error('Error creating SOS:', err);
-    res.status(500).json({ message: 'Failed to create SOS' });
+    console.error('Error creating SOS:', err.message, err.stack);
+    res.status(500).json({ message: 'Failed to create SOS', detail: err.message });
   }
 }
 
@@ -88,11 +141,13 @@ async function listSos(req, res) {
     let queryText = `
       SELECT s.*,
              ST_X(s.location::geometry) AS lng, ST_Y(s.location::geometry) AS lat,
-             u.full_name AS volunteer_name,
-             u.phone AS reporter_phone,
+             ack.full_name AS volunteer_name,
+             rep.phone AS reporter_phone,
+             rep.full_name AS reporter_name,
              d.name      AS disaster_name
       FROM sos_alerts s
-      LEFT JOIN users u     ON u.id = s.reporter_id OR u.id = s.acknowledged_by
+      LEFT JOIN users rep   ON rep.id = s.reporter_id
+      LEFT JOIN users ack   ON ack.id = s.acknowledged_by
       LEFT JOIN disasters d ON d.id = s.disaster_id`;
 
     // Global broadcast: Everyone sees every SOS.
@@ -287,6 +342,35 @@ async function cancelSos(req, res) {
   }
 }
 
+// DELETE /api/v1/sos/:id
+async function deleteSos(req, res) {
+  try {
+    const { id } = req.params;
+    const role = req.role || 'user';
+
+    if (role !== 'admin' && role !== 'coordinator') {
+      return res.status(403).json({ message: 'Only admins or coordinators can delete SOS alerts' });
+    }
+
+    const result = await db.query('DELETE FROM sos_alerts WHERE id = $1 RETURNING *', [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'SOS alert not found' });
+    }
+
+    // Emit event so UI can sync
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('sos_resolved', { id: id }); // Use resolved event to clear blips/counts
+    }
+
+    res.json({ message: 'SOS alert deleted successfully', deleted: result.rows[0] });
+  } catch (err) {
+    console.error('Error deleting SOS:', err);
+    res.status(500).json({ message: 'Failed to delete SOS alert' });
+  }
+}
+
 module.exports = {
   createSos,
   listSos,
@@ -295,4 +379,5 @@ module.exports = {
   getNearbySos,
   getTasksForSos,
   cancelSos,
+  deleteSos,
 };
