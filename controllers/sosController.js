@@ -55,7 +55,22 @@ async function createSos(req, res) {
       ]
     );
 
-    res.status(201).json(result.rows[0]);
+    const emittedAlert = result.rows[0];
+
+    // Emit real-time socket event
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('new_sos_alert', {
+        id: emittedAlert.id,
+        reporter_name: user.full_name,
+        reporter_phone: user.phone,
+        type: emittedAlert.type,
+        location: emittedAlert.location,
+        priority: emittedAlert.priority_score
+      });
+    }
+
+    res.status(201).json(emittedAlert);
   } catch (err) {
     console.error('Error creating SOS:', err);
     res.status(500).json({ message: 'Failed to create SOS' });

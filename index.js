@@ -14,8 +14,33 @@ const searchRoutes = require('./routes/searchRoutes');
 const organizationRoutes = require('./routes/organizationRoutes');
 const sosRoutes = require('./routes/sosRoutes');
 
+const { Server } = require('socket.io');
+const http = require('http');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Create HTTP server
+const server = http.createServer(app);
+
+// Initialize Socket.io
+const io = new Server(server, {
+    cors: {
+        origin: '*',
+        methods: ['GET', 'POST']
+    }
+});
+
+// Configure Socket connections
+io.on('connection', (socket) => {
+    console.log('Client connected to Socket.io:', socket.id);
+    socket.on('disconnect', () => {
+        console.log('Client disconnected:', socket.id);
+    });
+});
+
+// Make io accessible to our router
+app.set('io', io);
 
 // Middleware
 app.use(cors());
@@ -60,7 +85,7 @@ app.use('/api/v1/volunteer-assignments', require('./routes/volunteerAssignmentRo
 app.use(notFound);
 app.use(errorHandler);
 
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT} at 0.0.0.0`);
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server & Socket.io running in ${process.env.NODE_ENV} mode on port ${PORT} at 0.0.0.0`);
     console.log(`✅ Clerk Auth Initialized`);
 });
