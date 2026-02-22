@@ -48,6 +48,7 @@ app.set('io', io);
 // Middleware
 app.use(cors());
 app.use(express.json()); // Body parser
+app.use(express.urlencoded({ extended: true })); // Parse Twilio form data
 
 // Request logging (every request – for testing)
 const requestLogger = require('./middleware/requestLogger');
@@ -83,6 +84,7 @@ app.use('/api/v1/server', serverRoutes);
 app.use('/api/v1/search', searchRoutes);
 app.use('/api/v1/organizations', organizationRoutes);
 app.use('/api/v1/sos', sosRoutes);
+app.use('/api/v1/twilio', require('./routes/twilioRoutes'));
 app.use('/api/v1/volunteer-assignments', require('./routes/volunteerAssignmentRoutes'));
 
 // Error Handling Middleware
