@@ -23,12 +23,15 @@ const PORT = process.env.PORT || 3000;
 // Create HTTP server
 const server = http.createServer(app);
 
-// Initialize Socket.io
+// Initialize Socket.io with flexible transports for better compatibility
 const io = new Server(server, {
     cors: {
-        origin: '*',
-        methods: ['GET', 'POST']
-    }
+        origin: '*', // Allow all for convenience, or limit to specific domains in prod
+        methods: ['GET', 'POST'],
+        credentials: true
+    },
+    transports: ['websocket', 'polling'], // Allow both for better handshake on some networks
+    allowEIO3: true // Compatibility with older clients if needed
 });
 
 // Configure Socket connections
@@ -62,6 +65,7 @@ healthRouter.get('/', (req, res) => {
     res.json({ ok: true, message: 'Backend reachable' });
 });
 app.use('/api/health', healthRouter);
+app.get('/health', (req, res) => res.status(200).send('OK'));
 
 // API routes
 app.use('/api/auth', require('./routes/authRoutes'));
