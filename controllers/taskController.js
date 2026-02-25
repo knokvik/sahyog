@@ -235,7 +235,23 @@ async function updateTaskStatus(req, res) {
       values
     );
 
-    res.json(result.rows[0]);
+    const updatedTask = result.rows[0];
+
+    // If task is completed and has a linked SOS, resolve the SOS too
+    if (status === 'completed' && updatedTask.sos_id) {
+      await db.query(
+        "UPDATE sos_alerts SET status = 'resolved', resolved_at = NOW() WHERE id = $1",
+        [updatedTask.sos_id]
+      );
+
+      // Emit resolution event for real-time dashboard sync
+      const io = req.app.get('io');
+      if (io) {
+        io.emit('sos_resolved', { id: updatedTask.sos_id });
+      }
+    }
+
+    res.json(updatedTask);
   } catch (err) {
     console.error('Error updating task:', err);
     res.status(500).json({ message: 'Failed to update task' });

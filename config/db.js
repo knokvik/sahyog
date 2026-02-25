@@ -8,7 +8,7 @@ if (!connectionString) {
 
 const pool = new Pool({
   connectionString,
-  // Allow SSL in production environments like Render/Heroku
+  // Allow SSL in production environments if configured via DB_SSL env var
   ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
 });
 
