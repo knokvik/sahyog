@@ -231,10 +231,10 @@ async function updateSosStatus(req, res) {
 
     const result = await db.query(
       `UPDATE sos_alerts
-       SET status = $1,
-           resolved_at = CASE WHEN $1 = 'resolved' THEN NOW() ELSE resolved_at END,
-           acknowledged_by = CASE WHEN $1 = 'acknowledged' AND acknowledged_by IS NULL THEN (SELECT id FROM users WHERE clerk_user_id = $2) ELSE acknowledged_by END,
-           acknowledged_at = CASE WHEN $1 = 'acknowledged' AND acknowledged_at IS NULL THEN NOW() ELSE acknowledged_at END
+       SET status = $1::varchar,
+           resolved_at = CASE WHEN $1::varchar = 'resolved' THEN NOW() ELSE resolved_at END,
+           acknowledged_by = CASE WHEN $1::varchar = 'acknowledged' AND acknowledged_by IS NULL THEN (SELECT id FROM users WHERE clerk_user_id = $2) ELSE acknowledged_by END,
+           acknowledged_at = CASE WHEN $1::varchar = 'acknowledged' AND acknowledged_at IS NULL THEN NOW() ELSE acknowledged_at END
        WHERE id = $3
        RETURNING *`,
       [status, userId, id]
