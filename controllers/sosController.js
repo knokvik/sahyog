@@ -217,8 +217,11 @@ async function updateSosStatus(req, res) {
     const isAdminOrHead = ['admin', 'coordinator'].includes(role);
 
     // Authorization: reporter can cancel, responder can update, admins can do anything
+    // Anyone (volunteers included) can acknowledge an unassigned SOS
     if (!isReporter && !isAcknowledgedByMe && !isAdminOrHead) {
-      return res.status(403).json({ message: 'You do not have permission to update this SOS alert' });
+      if (status !== 'acknowledged') {
+        return res.status(403).json({ message: 'You do not have permission to update this SOS alert' });
+      }
     }
 
     // Reporters can only cancel their own reports
