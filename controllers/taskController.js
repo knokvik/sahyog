@@ -73,6 +73,42 @@ async function createTask(req, res) {
       return res.status(403).json({ message: 'Only volunteer/coordinator/admin can create tasks' });
     }
 
+    // Validate foreign key references
+    if (need_id) {
+      const needCheck = await db.query('SELECT id FROM needs WHERE id = $1', [need_id]);
+      if (needCheck.rows.length === 0) {
+        return res.status(404).json({ message: 'Referenced need not found' });
+      }
+    }
+
+    if (disaster_id) {
+      const disasterCheck = await db.query('SELECT id FROM disasters WHERE id = $1', [disaster_id]);
+      if (disasterCheck.rows.length === 0) {
+        return res.status(404).json({ message: 'Referenced disaster not found' });
+      }
+    }
+
+    if (zone_id) {
+      const zoneCheck = await db.query('SELECT id FROM zones WHERE id = $1', [zone_id]);
+      if (zoneCheck.rows.length === 0) {
+        return res.status(404).json({ message: 'Referenced zone not found' });
+      }
+    }
+
+    if (volunteer_id) {
+      const volunteerCheck = await db.query('SELECT id FROM users WHERE id = $1 AND role = $2', [volunteer_id, 'volunteer']);
+      if (volunteerCheck.rows.length === 0) {
+        return res.status(404).json({ message: 'Referenced volunteer not found' });
+      }
+    }
+
+    if (sosId) {
+      const sosCheck = await db.query('SELECT id FROM sos_alerts WHERE id = $1', [sosId]);
+      if (sosCheck.rows.length === 0) {
+        return res.status(404).json({ message: 'Referenced SOS alert not found' });
+      }
+    }
+
     const locString = meeting_point
       ? `POINT(${meeting_point.lng} ${meeting_point.lat})`
       : null;
@@ -190,7 +226,70 @@ async function updateTaskStatus(req, res) {
 
     // Allow acceptance if it's currently unassigned and status is pending
     if (status === 'accepted' && !task.volunteer_id && task.status === 'pending' && role === 'volunteer') {
-      // Allow this through - we will update volunteer_id as well
+      // Validate volunteer can accept this task
+      
+      // 1. Check volunteer has required skills for task type
+      const volunteerSkills = await db.query(
+        'SELECT skills FROM volunteers WHERE user_id = $1',
+        [currentUser.id]
+      );
+      const skills = volunteerSkills.rows[0]?.skills || [];
+      
+      // Define required skills for critical task types
+      const criticalTaskTypes = ['medical', 'rescue', 'fire', 'evacuation'];
+      if (criticalTaskTypes.includes(task.type) && !skills.includes(task.type)) {
+        return res.status(403).json({
+          message: `This ${task.type} task requires specific training. Please contact a coordinator.`,
+          required_training: task.type,
+          your_skills: skills
+        });
+      }
+      
+      // 2. Check volunteer is within reasonable distance (50km max)
+      if (task.meeting_point) {
+        const volunteerLocation = await db.query(
+          'SELECT current_location FROM users WHERE id = $1',
+          [currentUser.id]
+        );
+        
+        if (volunteerLocation.rows[0]?.current_location) {
+          const distanceResult = await db.query(
+            `SELECT ST_Distance(
+              $1::geography,
+              $2::geography
+            ) / 1000 as distance_km`,
+            [volunteerLocation.rows[0].current_location, task.meeting_point]
+          );
+          
+          const distanceKm = distanceResult.rows[0]?.distance_km;
+          const MAX_ACCEPTANCE_DISTANCE_KM = 50;
+          
+          if (distanceKm > MAX_ACCEPTANCE_DISTANCE_KM) {
+            return res.status(403).json({
+              message: `You are too far from this task location (${Math.round(distanceKm)}km away). Maximum distance is ${MAX_ACCEPTANCE_DISTANCE_KM}km.`,
+              distance_km: Math.round(distanceKm),
+              max_distance_km: MAX_ACCEPTANCE_DISTANCE_KM
+            });
+          }
+        }
+      }
+      
+      // 3. Check volunteer isn't already overloaded (max 3 active tasks)
+      const activeTaskCount = await db.query(
+        `SELECT COUNT(*) as count FROM tasks 
+         WHERE volunteer_id = $1 AND status IN ('pending', 'accepted', 'in_progress')`,
+        [currentUser.id]
+      );
+      
+      const MAX_ACTIVE_TASKS = 3;
+      if (parseInt(activeTaskCount.rows[0].count) >= MAX_ACTIVE_TASKS) {
+        return res.status(403).json({
+          message: `You have reached the maximum of ${MAX_ACTIVE_TASKS} active tasks. Complete existing tasks before accepting new ones.`,
+          active_tasks: parseInt(activeTaskCount.rows[0].count),
+          max_tasks: MAX_ACTIVE_TASKS
+        });
+      }
+      
     } else if (role === 'volunteer' && task.volunteer_id !== currentUser.id) {
       return res.status(403).json({ message: 'Volunteers can update only their own tasks' });
     }
@@ -237,17 +336,36 @@ async function updateTaskStatus(req, res) {
 
     const updatedTask = result.rows[0];
 
-    // If task is completed and has a linked SOS, resolve the SOS too
+    // If task is completed and has a linked SOS, notify but DO NOT auto-resolve
+    // SOS resolution requires coordinator approval or proof (handled in sosController)
     if (status === 'completed' && updatedTask.sos_id) {
+      // Only update SOS to 'in_progress' if it's still triggered, never auto-resolve
       await db.query(
-        "UPDATE sos_alerts SET status = 'resolved', resolved_at = NOW() WHERE id = $1",
-        [updatedTask.sos_id]
+        `UPDATE sos_alerts 
+         SET status = CASE 
+           WHEN status = 'triggered' THEN 'acknowledged'
+           ELSE status 
+         END,
+         acknowledged_by = CASE 
+           WHEN acknowledged_by IS NULL THEN $2 
+           ELSE acknowledged_by 
+         END,
+         acknowledged_at = CASE 
+           WHEN acknowledged_at IS NULL THEN NOW() 
+           ELSE acknowledged_at 
+         END
+         WHERE id = $1`,
+        [updatedTask.sos_id, currentUser.id]
       );
 
-      // Emit resolution event for real-time dashboard sync
+      // Emit notification that task is complete but SOS needs manual resolution
       const io = req.app.get('io');
       if (io) {
-        io.emit('sos_resolved', { id: updatedTask.sos_id });
+        io.emit('task_completed_sos_pending', { 
+          task_id: updatedTask.id,
+          sos_id: updatedTask.sos_id,
+          message: 'Task completed. SOS requires coordinator review for resolution.'
+        });
       }
     }
 
@@ -276,6 +394,21 @@ async function voteTaskCompletion(req, res) {
 
     const task = await loadTask(id);
     if (!task) return res.status(404).json({ message: 'Task not found' });
+    
+    // Prevent volunteers from voting on their own tasks
+    if (task.volunteer_id === currentUser.id) {
+      return res.status(403).json({ 
+        message: 'You cannot vote on completion of your own task. Other volunteers or coordinators must verify your work.' 
+      });
+    }
+    
+    // Prevent voting on tasks that aren't in 'completed' status awaiting verification
+    if (task.status !== 'completed' && vote === 'completed') {
+      return res.status(400).json({
+        message: 'Can only vote to confirm completion on tasks marked as completed by the volunteer',
+        current_status: task.status
+      });
+    }
 
     await ensureVoteTable();
 

@@ -119,6 +119,33 @@ async function activateDisaster(req, res) {
 async function resolveDisaster(req, res) {
   try {
     const { id } = req.params;
+    const role = req.role || 'user';
+    
+    // Only admins and coordinators can resolve disasters
+    if (!['admin', 'coordinator'].includes(role)) {
+      return res.status(403).json({ 
+        message: 'Only administrators or coordinators can resolve disasters' 
+      });
+    }
+    
+    // Check if disaster has active tasks or SOS alerts
+    const activeItems = await db.query(
+      `SELECT 
+        (SELECT COUNT(*) FROM tasks WHERE disaster_id = $1 AND status IN ('pending', 'accepted', 'in_progress')) as active_tasks,
+        (SELECT COUNT(*) FROM sos_alerts WHERE disaster_id = $1 AND status IN ('triggered', 'acknowledged')) as active_sos`,
+      [id]
+    );
+    
+    const { active_tasks, active_sos } = activeItems.rows[0];
+    
+    if (parseInt(active_tasks) > 0 || parseInt(active_sos) > 0) {
+      return res.status(400).json({
+        message: 'Cannot resolve disaster with active tasks or SOS alerts',
+        active_tasks: parseInt(active_tasks),
+        active_sos: parseInt(active_sos)
+      });
+    }
+    
     const result = await db.query(
       `UPDATE disasters
        SET status = 'resolved',

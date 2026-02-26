@@ -96,6 +96,46 @@ async function checkIn(req, res) {
     const { id } = req.params;
     const { count } = req.body;
     const people = parseInt(count || '1', 10);
+    
+    if (people <= 0) {
+      return res.status(400).json({ message: 'Check-in count must be at least 1' });
+    }
+
+    // Get current shelter status with capacity
+    const shelterResult = await db.query(
+      'SELECT capacity, current_occupancy, name FROM shelters WHERE id = $1',
+      [id]
+    );
+    
+    if (shelterResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Shelter not found' });
+    }
+    
+    const shelter = shelterResult.rows[0];
+    
+    // Check if shelter has capacity defined
+    if (shelter.capacity !== null && shelter.capacity !== undefined) {
+      const newOccupancy = shelter.current_occupancy + people;
+      
+      // Prevent exceeding capacity
+      if (newOccupancy > shelter.capacity) {
+        const availableSpace = shelter.capacity - shelter.current_occupancy;
+        return res.status(400).json({
+          message: `Check-in would exceed shelter capacity`,
+          shelter_name: shelter.name,
+          capacity: shelter.capacity,
+          current_occupancy: shelter.current_occupancy,
+          available_space: availableSpace,
+          requested_checkin: people
+        });
+      }
+      
+      // Warn if reaching 90% capacity
+      const capacityPercentage = (newOccupancy / shelter.capacity) * 100;
+      if (capacityPercentage >= 90) {
+        console.warn(`[SHELTER WARNING] ${shelter.name} is at ${Math.round(capacityPercentage)}% capacity`);
+      }
+    }
 
     const updated = await db.query(
       `UPDATE shelters
@@ -104,10 +144,6 @@ async function checkIn(req, res) {
        RETURNING *`,
       [people, id]
     );
-
-    if (updated.rows.length === 0) {
-      return res.status(404).json({ message: 'Shelter not found' });
-    }
 
     res.json(updated.rows[0]);
   } catch (err) {

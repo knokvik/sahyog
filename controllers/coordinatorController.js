@@ -155,25 +155,7 @@ async function getNeeds(req, res) {
        ORDER BY n.reported_at DESC
        LIMIT 200`
         );
-        const rows = [...result.rows];
-        const email = req.user?.emailAddresses?.[0]?.emailAddress;
-        if (email === 'arya.mahindrakar07@gmail.com') {
-            rows.unshift({
-                id: 'debug-need-1',
-                request_code: 'DBG-NEED-001',
-                reporter_name: 'Debug Citizen',
-                reporter_phone: '+910000000001',
-                type: 'medical',
-                persons_count: 2,
-                description: 'Debug entry for coordinator needs dashboard.',
-                urgency: 'high',
-                status: 'unassigned',
-                assigned_volunteer_id: null,
-                reported_at: new Date().toISOString(),
-                debug: true
-            });
-        }
-        res.json(rows);
+        res.json(result.rows);
     } catch (err) {
         console.error('[coordinator/needs] error:', err);
         res.status(500).json({ message: 'Failed to fetch needs' });
@@ -218,20 +200,7 @@ async function getMissingPersons(req, res) {
              FROM missing_persons 
              ORDER BY ${sort} ${order} NULLS LAST LIMIT 200`
         );
-        const rows = [...result.rows];
-        const email = req.user?.emailAddresses?.[0]?.emailAddress;
-        if (email === 'arya.mahindrakar07@gmail.com') {
-            rows.unshift({
-                id: 'debug-missing-1',
-                reporter_phone: '+910000000011',
-                name: 'Debug Missing Person',
-                age: 12,
-                status: 'missing',
-                created_at: new Date().toISOString(),
-                debug: true
-            });
-        }
-        res.json(rows);
+        res.json(result.rows);
     } catch (err) {
         console.error('[coordinator/missing] error:', err);
         res.status(500).json({ message: 'Failed to fetch missing persons' });

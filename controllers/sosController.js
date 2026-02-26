@@ -189,7 +189,7 @@ async function getSosById(req, res) {
 async function updateSosStatus(req, res) {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, resolution_proof, resolution_notes } = req.body;
     const { userId } = req.auth || {};
     const role = req.role || 'user';
 
@@ -216,15 +216,48 @@ async function updateSosStatus(req, res) {
     const isAcknowledgedByMe = sos.acknowledged_by_clerk_id === userId;
     const isAdminOrHead = ['admin', 'coordinator'].includes(role);
 
-    // Authorization: reporter can cancel, responder can update, admins can do anything
-    // Anyone (volunteers included) can acknowledge an unassigned SOS
+    // STRICT AUTHORIZATION RULES:
+    
+    // 1. RESOLVED status requires coordinator/admin OR proof from acknowledged responder
+    if (status === 'resolved') {
+      if (isAdminOrHead) {
+        // Admins/coordinators can resolve with optional proof
+      } else if (isAcknowledgedByMe) {
+        // The responder who acknowledged can resolve BUT needs proof
+        if (!resolution_proof || resolution_proof.length === 0) {
+          return res.status(403).json({ 
+            message: 'Resolution requires photo/video proof. Upload proof and try again.' 
+          });
+        }
+      } else {
+        return res.status(403).json({ 
+          message: 'Only coordinators, admins, or the assigned responder can resolve an SOS' 
+        });
+      }
+    }
+
+    // 2. Anyone (volunteers included) can acknowledge an unassigned SOS
+    if (status === 'acknowledged' && !isAdminOrHead) {
+      if (sos.acknowledged_by && !isAcknowledgedByMe) {
+        return res.status(403).json({ message: 'SOS is already being handled by another responder' });
+      }
+    }
+
+    // 3. Reporters can only cancel their own reports
+    if (status === 'cancelled') {
+      if (!isReporter && !isAdminOrHead) {
+        return res.status(403).json({ message: 'Only the reporter or admins can cancel an SOS' });
+      }
+    }
+
+    // 4. General permission check for other status changes
     if (!isReporter && !isAcknowledgedByMe && !isAdminOrHead) {
       if (status !== 'acknowledged') {
         return res.status(403).json({ message: 'You do not have permission to update this SOS alert' });
       }
     }
 
-    // Reporters can only cancel their own reports
+    // 5. Reporters cannot change status except to cancel
     if (isReporter && !isAcknowledgedByMe && !isAdminOrHead && status !== 'cancelled') {
       return res.status(403).json({ message: 'You can only cancel your own SOS reports' });
     }
@@ -234,10 +267,12 @@ async function updateSosStatus(req, res) {
        SET status = $1::varchar,
            resolved_at = CASE WHEN $1::varchar = 'resolved' THEN NOW() ELSE resolved_at END,
            acknowledged_by = CASE WHEN $1::varchar = 'acknowledged' AND acknowledged_by IS NULL THEN (SELECT id FROM users WHERE clerk_user_id = $2) ELSE acknowledged_by END,
-           acknowledged_at = CASE WHEN $1::varchar = 'acknowledged' AND acknowledged_at IS NULL THEN NOW() ELSE acknowledged_at END
+           acknowledged_at = CASE WHEN $1::varchar = 'acknowledged' AND acknowledged_at IS NULL THEN NOW() ELSE acknowledged_at END,
+           resolution_proof = CASE WHEN $1::varchar = 'resolved' THEN $4 ELSE resolution_proof END,
+           resolution_notes = CASE WHEN $1::varchar = 'resolved' THEN $5 ELSE resolution_notes END
        WHERE id = $3
        RETURNING *`,
-      [status, userId, id]
+      [status, userId, id, resolution_proof || null, resolution_notes || null]
     );
 
     res.json(result.rows[0]);

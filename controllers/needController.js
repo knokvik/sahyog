@@ -33,43 +33,7 @@ async function listNeeds(req, res) {
             FROM needs 
             ORDER BY reported_at DESC
         `);
-        const rows = [...result.rows];
-
-        const email = req.user?.emailAddresses?.[0]?.emailAddress;
-        if (email === 'arya.mahindrakar07@gmail.com') {
-            rows.unshift({
-                id: 'debug-need-1',
-                request_code: 'DBG-NEED-001',
-                reporter_name: 'Debug Citizen',
-                reporter_phone: '+910000000001',
-                type: 'medical',
-                persons_count: 2,
-                description: 'Debug entry for UI testing in coordinator/needs screens.',
-                urgency: 'high',
-                status: 'unassigned',
-                assigned_volunteer_id: null,
-                reported_at: new Date().toISOString(),
-                resolved_at: null,
-                debug: true
-            });
-            rows.unshift({
-                id: 'debug-need-2',
-                request_code: 'DBG-NEED-002',
-                reporter_name: 'Debug Citizen 2',
-                reporter_phone: '+910000000002',
-                type: 'shelter',
-                persons_count: 5,
-                description: 'Temporary shelter required in flood-affected lane.',
-                urgency: 'medium',
-                status: 'assigned',
-                assigned_volunteer_id: 'debug-volunteer-1',
-                reported_at: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-                resolved_at: null,
-                debug: true
-            });
-        }
-
-        res.json(rows);
+        res.json(result.rows);
     } catch (err) {
         console.error('Error listing needs:', err);
         res.status(500).json({ message: 'Failed to list needs' });
@@ -97,13 +61,50 @@ async function assignVolunteer(req, res) {
 async function resolveNeed(req, res) {
     try {
         const { id } = req.params;
-        const result = await db.query(
-            `UPDATE needs SET status = 'resolved', resolved_at = NOW() WHERE id = $1 RETURNING *`,
+        const { resolution_proof, resolution_notes } = req.body || {};
+        const role = req.role || 'volunteer';
+        const currentUser = req.dbUser;
+        
+        // Get the need details
+        const needResult = await db.query(
+            'SELECT * FROM needs WHERE id = $1',
             [id]
         );
-        if (result.rows.length === 0) {
+        
+        if (needResult.rows.length === 0) {
             return res.status(404).json({ message: 'Need not found' });
         }
+        
+        const need = needResult.rows[0];
+        const isAssignedVolunteer = need.assigned_volunteer_id === currentUser?.id;
+        const isCoordinatorOrAdmin = ['coordinator', 'admin'].includes(role);
+        
+        // Authorization: Only assigned volunteer, coordinator, or admin can resolve
+        if (!isAssignedVolunteer && !isCoordinatorOrAdmin) {
+            return res.status(403).json({
+                message: 'Only the assigned volunteer, coordinator, or admin can resolve this need'
+            });
+        }
+        
+        // Require proof for resolution (except coordinators/admins who can override)
+        if (!isCoordinatorOrAdmin && (!resolution_proof || resolution_proof.length === 0)) {
+            return res.status(403).json({
+                message: 'Resolution requires photo/video proof of fulfillment. Please upload proof and try again.'
+            });
+        }
+        
+        const result = await db.query(
+            `UPDATE needs 
+             SET status = 'resolved', 
+                 resolved_at = NOW(),
+                 resolution_proof = $2,
+                 resolution_notes = $3,
+                 resolved_by = $4
+             WHERE id = $1 
+             RETURNING *`,
+            [id, resolution_proof || null, resolution_notes || null, currentUser?.id || null]
+        );
+        
         res.json(result.rows[0]);
     } catch (err) {
         console.error('Error resolving need:', err);

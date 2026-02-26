@@ -57,6 +57,32 @@ async function listZones(req, res) {
 async function deleteZone(req, res) {
     try {
         const { zoneId } = req.params;
+        
+        // Check for active assignments before deletion
+        const activeAssignments = await db.query(
+            `SELECT 
+                (SELECT COUNT(*) FROM tasks WHERE zone_id = $1 AND status IN ('pending', 'accepted', 'in_progress')) as active_tasks,
+                (SELECT COUNT(*) FROM volunteer_disaster_assignments WHERE zone_id = $1 AND status = 'accepted') as active_volunteers,
+                (SELECT COUNT(*) FROM disaster_coordinator_assignments WHERE zone_id = $1) as active_coordinators,
+                (SELECT COUNT(*) FROM resources WHERE current_zone_id = $1) as deployed_resources`,
+            [zoneId]
+        );
+        
+        const { active_tasks, active_volunteers, active_coordinators, deployed_resources } = activeAssignments.rows[0];
+        
+        const totalActive = parseInt(active_tasks) + parseInt(active_volunteers) + 
+                           parseInt(active_coordinators) + parseInt(deployed_resources);
+        
+        if (totalActive > 0) {
+            return res.status(400).json({
+                message: 'Cannot delete zone with active assignments. Reassign or complete all activities first.',
+                active_tasks: parseInt(active_tasks),
+                active_volunteers: parseInt(active_volunteers),
+                active_coordinators: parseInt(active_coordinators),
+                deployed_resources: parseInt(deployed_resources)
+            });
+        }
+        
         const result = await db.query('DELETE FROM zones WHERE id = $1 RETURNING id', [zoneId]);
         if (result.rows.length === 0) return res.status(404).json({ message: 'Zone not found' });
         res.json({ message: 'Zone deleted', id: result.rows[0].id });
