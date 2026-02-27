@@ -43,12 +43,14 @@ CREATE TABLE users (
     phone varchar UNIQUE,
     email varchar UNIQUE,
     full_name varchar NOT NULL,
+    -- Role can be: user, volunteer, coordinator, ngo_admin, district_admin
     role varchar NOT NULL DEFAULT 'volunteer'
         CHECK (role IN (
+            'user',
             'volunteer',
             'coordinator',
-            'admin',
-            'organization'
+            'ngo_admin',
+            'district_admin'
         )),
     organization_id uuid REFERENCES organizations(id) ON DELETE SET NULL,
     is_active boolean DEFAULT true,

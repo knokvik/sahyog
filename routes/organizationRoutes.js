@@ -18,11 +18,15 @@ const {
     acceptOrgRequest,
     rejectOrgRequest,
     assignCoordinator,
+    listNearbyOrganizations,
+    joinOrganization,
 } = require('../controllers/organizationController');
 const { listAllOrgs } = require('../controllers/disasterRequestController');
 
-// Registration — only requires auth (role will be set after registration)
+// Registration & Discovery
 router.post('/register', verifyToken, registerOrg);
+router.get('/nearby', verifyToken, listNearbyOrganizations);
+router.post('/join', verifyToken, joinOrganization);
 
 // List all orgs (for admin to select when sending requests)
 router.get('/list', verifyToken, checkRole('admin'), listAllOrgs);

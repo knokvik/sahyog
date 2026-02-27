@@ -59,7 +59,8 @@ const updateUserRole = async (req, res) => {
     const { uid } = req.params;
     const { role } = req.body;
 
-    const validRoles = ['volunteer', 'coordinator', 'admin', 'organization'];
+    // Updated roles for dual hierarchy
+    const validRoles = ['user', 'volunteer', 'coordinator', 'ngo_admin', 'district_admin'];
 
     if (!validRoles.includes(role)) {
         return res.status(400).json({ message: `Invalid role. Allowed: ${validRoles.join(', ')}` });

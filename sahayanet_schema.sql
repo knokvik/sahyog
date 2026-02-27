@@ -30,9 +30,13 @@ CREATE TABLE organizations (
     email varchar,
     state varchar,
     district varchar,
+    type varchar DEFAULT 'ngo',
+    location geometry(Point, 4326),
     created_at timestamp DEFAULT now(),
     updated_at timestamp DEFAULT now()
 );
+
+CREATE INDEX IF NOT EXISTS idx_organizations_location ON organizations USING GIST(location);
 
 -- =========================
 -- USERS (NEW ROLE SYSTEM)
@@ -43,17 +47,19 @@ CREATE TABLE users (
     phone varchar UNIQUE,
     email varchar UNIQUE,
     full_name varchar NOT NULL,
+    -- Role can be: user, volunteer, coordinator, ngo_admin, district_admin
     role varchar NOT NULL DEFAULT 'volunteer'
         CHECK (role IN (
+            'user',
             'volunteer',
             'coordinator',
-            'admin',
-            'organization',
-            'user'
+            'ngo_admin',
+            'district_admin'
         )),
     organization_id uuid REFERENCES organizations(id) ON DELETE SET NULL,
     is_active boolean DEFAULT true,
     is_verified boolean DEFAULT false,
+    is_system_admin boolean DEFAULT false,
     current_location geometry(Point, 4326),
     avatar_url text, 
     blood_group varchar(10),
@@ -218,3 +224,31 @@ CREATE TABLE missing_persons (
     disaster_id uuid REFERENCES disasters(id),
     created_at timestamp DEFAULT now()
 );
+-- =========================
+-- COORDINATOR & VOLUNTEER ASSIGNMENTS
+-- =========================
+CREATE TABLE IF NOT EXISTS disaster_coordinator_assignments (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    disaster_id uuid REFERENCES disasters(id) ON DELETE CASCADE,
+    zone_id uuid REFERENCES zones(id) ON DELETE CASCADE,
+    organization_id uuid REFERENCES organizations(id) ON DELETE CASCADE,
+    coordinator_id uuid REFERENCES users(id) ON DELETE CASCADE,
+    status varchar DEFAULT 'active',
+    created_at timestamp DEFAULT now(),
+    UNIQUE(disaster_id, zone_id, organization_id, coordinator_id)
+);
+
+CREATE TABLE IF NOT EXISTS volunteer_disaster_assignments (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    disaster_id uuid REFERENCES disasters(id) ON DELETE CASCADE,
+    zone_id uuid REFERENCES zones(id) ON DELETE CASCADE,
+    coordinator_id uuid REFERENCES users(id) ON DELETE CASCADE,
+    volunteer_id uuid REFERENCES users(id) ON DELETE CASCADE,
+    status varchar DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected')),
+    responded_at timestamp,
+    created_at timestamp DEFAULT now(),
+    UNIQUE(disaster_id, volunteer_id)
+);
+
+CREATE INDEX idx_vol_disaster_status ON volunteer_disaster_assignments(status);
+CREATE INDEX idx_vol_disaster_volunteer ON volunteer_disaster_assignments(volunteer_id);

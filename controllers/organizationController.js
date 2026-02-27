@@ -509,24 +509,105 @@ async function assignCoordinator(req, res) {
             [disasterId, zone_id, orgId, coordinator_id]
         );
 
-        // Create volunteer assignments for coordinator's volunteers
-        const volunteers = await db.query(
-            `SELECT id FROM users WHERE organization_id = $1 AND role = 'volunteer' AND is_active = true`,
-            [orgId]
+        await db.query(
+            `INSERT INTO disaster_coordinator_assignments (disaster_id, zone_id, organization_id, coordinator_id)
+             VALUES ($1, $2, $3, $4)`,
+            [disasterId, zone_id, orgId, coordinator_id]
         );
 
-        for (const vol of volunteers.rows) {
-            await db.query(
-                `INSERT INTO volunteer_disaster_assignments (disaster_id, zone_id, coordinator_id, volunteer_id)
-                 VALUES ($1, $2, $3, $4)`,
-                [disasterId, zone_id, coordinator_id, vol.id]
-            );
-        }
+        // [FIX] Automatic volunteer exhaustion removed. 
+        // We no longer auto-assign all organization volunteers to the disaster.
+        // Instead, the coordinator or admin will need to assign volunteers to specific tasks.
 
-        res.json({ message: 'Coordinator assigned, volunteers notified', volunteers_notified: volunteers.rows.length });
+        res.json({
+            message: 'Coordinator assigned successfully. Use the volunteer assignment module to allocate specific volunteers to this zone.',
+            disaster_id: disasterId,
+            zone_id: zone_id,
+            coordinator_id: coordinator_id
+        });
     } catch (err) {
         console.error('[500] assignCoordinator error:', err?.message || err);
         res.status(500).json({ message: 'Failed to assign coordinator' });
+    }
+}
+
+// ─── GET /nearby — list nearby NGOs/Gov bodies ─────────────────────
+async function listNearbyOrganizations(req, res) {
+    try {
+        const { lat, lng, radius = 50000, type } = req.query; // 50km default
+        if (!lat || !lng) return res.status(400).json({ message: 'lat and lng required' });
+
+        const latitude = parseFloat(lat);
+        const longitude = parseFloat(lng);
+
+        let query = `
+            SELECT id, name, type, registration_number, primary_phone, email, state, district,
+                   ST_X(location::geometry) as lng, ST_Y(location::geometry) as lat,
+                   ST_Distance(location, ST_SetSRID(ST_MakePoint($1, $2), 4326)) as distance
+            FROM organizations
+            WHERE ST_DWithin(location, ST_SetSRID(ST_MakePoint($1, $2), 4326), $3)
+        `;
+        const params = [longitude, latitude, radius];
+
+        if (type) {
+            query += ' AND type = $4';
+            params.push(type);
+        }
+
+        query += ' ORDER BY distance ASC LIMIT 20';
+
+        const result = await db.query(query, params);
+        res.json(result.rows);
+    } catch (err) {
+        console.error('[500] listNearbyOrganizations error:', err?.message || err);
+        res.status(500).json({ message: 'Failed to search organizations' });
+    }
+}
+
+// ─── POST /join — link user to an existing organization ────────────
+async function joinOrganization(req, res) {
+    try {
+        const uid = req.auth?.userId || req.user?.id;
+        const { organization_id } = req.body;
+
+        if (!organization_id) return res.status(400).json({ message: 'organization_id required' });
+
+        // Update local DB
+        const result = await db.query(
+            `UPDATE users SET organization_id = $1, updated_at = NOW()
+             WHERE clerk_user_id = $2 RETURNING organization_id`,
+            [organization_id, uid]
+        );
+
+        if (result.rowCount === 0) return res.status(404).json({ message: 'User not found' });
+
+        // Note: We don't change the role automatically here unless it's already 'volunteer' or 'user'
+        // or we can explicitly set it to 'volunteer' if they were just a 'user'.
+        const userCheck = await db.query('SELECT role FROM users WHERE clerk_user_id = $1', [uid]);
+        if (userCheck.rows[0].role === 'user') {
+            await db.query(`UPDATE users SET role = 'volunteer' WHERE clerk_user_id = $1`, [uid]);
+            try {
+                await clerkClient.users.updateUserMetadata(uid, {
+                    publicMetadata: { role: 'volunteer', organization_id }
+                });
+            } catch (clerkErr) {
+                console.warn('[warn] Could not sync metadata to Clerk:', clerkErr?.message);
+            }
+        } else {
+            // Just sync the org_id
+            try {
+                await clerkClient.users.updateUserMetadata(uid, {
+                    publicMetadata: { organization_id }
+                });
+            } catch (clerkErr) {
+                console.warn('[warn] Could not sync organization_id to Clerk:', clerkErr?.message);
+            }
+        }
+
+        res.json({ message: 'Joined organization successfully', organization_id });
+    } catch (err) {
+        console.error('[500] joinOrganization error:', err?.message || err);
+        res.status(500).json({ message: 'Failed to join organization' });
     }
 }
 
@@ -546,4 +627,6 @@ module.exports = {
     acceptOrgRequest,
     rejectOrgRequest,
     assignCoordinator,
+    listNearbyOrganizations,
+    joinOrganization,
 };

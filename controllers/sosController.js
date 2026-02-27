@@ -189,7 +189,7 @@ async function getSosById(req, res) {
 async function updateSosStatus(req, res) {
   try {
     const { id } = req.params;
-    const { status, resolution_proof, resolution_notes } = req.body;
+    const { status, resolution_proof, resolution_notes, assigned_volunteer_id } = req.body;
     const { userId } = req.auth || {};
     const role = req.role || 'user';
 
@@ -217,7 +217,7 @@ async function updateSosStatus(req, res) {
     const isAdminOrHead = ['admin', 'coordinator'].includes(role);
 
     // STRICT AUTHORIZATION RULES:
-    
+
     // 1. RESOLVED status requires coordinator/admin OR proof from acknowledged responder
     if (status === 'resolved') {
       if (isAdminOrHead) {
@@ -225,13 +225,13 @@ async function updateSosStatus(req, res) {
       } else if (isAcknowledgedByMe) {
         // The responder who acknowledged can resolve BUT needs proof
         if (!resolution_proof || resolution_proof.length === 0) {
-          return res.status(403).json({ 
-            message: 'Resolution requires photo/video proof. Upload proof and try again.' 
+          return res.status(403).json({
+            message: 'Resolution requires photo/video proof. Upload proof and try again.'
           });
         }
       } else {
-        return res.status(403).json({ 
-          message: 'Only coordinators, admins, or the assigned responder can resolve an SOS' 
+        return res.status(403).json({
+          message: 'Only coordinators, admins, or the assigned responder can resolve an SOS'
         });
       }
     }
@@ -269,10 +269,11 @@ async function updateSosStatus(req, res) {
            acknowledged_by = CASE WHEN $1::varchar = 'acknowledged' AND acknowledged_by IS NULL THEN (SELECT id FROM users WHERE clerk_user_id = $2) ELSE acknowledged_by END,
            acknowledged_at = CASE WHEN $1::varchar = 'acknowledged' AND acknowledged_at IS NULL THEN NOW() ELSE acknowledged_at END,
            resolution_proof = CASE WHEN $1::varchar = 'resolved' THEN $4 ELSE resolution_proof END,
-           resolution_notes = CASE WHEN $1::varchar = 'resolved' THEN $5 ELSE resolution_notes END
+           resolution_notes = CASE WHEN $1::varchar = 'resolved' THEN $5 ELSE resolution_notes END,
+           assigned_volunteer_id = CASE WHEN $6::uuid IS NOT NULL THEN $6::uuid ELSE assigned_volunteer_id END
        WHERE id = $3
        RETURNING *`,
-      [status, userId, id, resolution_proof || null, resolution_notes || null]
+      [status, userId, id, resolution_proof || null, resolution_notes || null, assigned_volunteer_id || null]
     );
 
     res.json(result.rows[0]);

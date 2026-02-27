@@ -14,6 +14,8 @@ const {
     markMissingFound,
     reassignTask,
     getZones,
+    getMyZones,
+    getMyZoneVolunteers,
 } = require('../controllers/coordinatorController');
 
 router.get('/context', verifyJWT, checkRole('coordinator'), getContext);
@@ -27,5 +29,11 @@ router.get('/missing', verifyJWT, checkRole('coordinator'), getMissingPersons);
 router.patch('/missing/:id/found', verifyJWT, checkRole('coordinator'), markMissingFound);
 router.patch('/tasks/:id/reassign', verifyJWT, checkRole('coordinator'), reassignTask);
 router.get('/zones', verifyJWT, checkRole('coordinator'), getZones);
+
+// New: Get all zones assigned to this coordinator
+router.get('/my-zones', verifyJWT, checkRole('coordinator'), getMyZones);
+
+// New: Get all volunteers assigned to this coordinator's zones
+router.get('/my-zone-volunteers', verifyJWT, checkRole('coordinator'), getMyZoneVolunteers);
 
 module.exports = router;

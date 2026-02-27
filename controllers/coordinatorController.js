@@ -1,3 +1,60 @@
+// GET /api/v1/coordinator/my-zone-volunteers
+// Returns all volunteers assigned to zones where the coordinator is assigned (primary/backup)
+async function getMyZoneVolunteers(req, res) {
+    try {
+        const { userId } = req.auth || {};
+        if (!userId) return res.status(401).json({ message: 'Not authenticated' });
+        // Find coordinator's DB id
+        const dbUser = await db.query('SELECT id FROM users WHERE clerk_user_id = $1', [userId]);
+        const coordinatorId = dbUser.rows[0]?.id;
+        if (!coordinatorId) return res.status(404).json({ message: 'Coordinator not found' });
+        // Get all zone_ids where this coordinator is assigned
+        const zonesResult = await db.query(
+            `SELECT zone_id FROM disaster_coordinator_assignments WHERE coordinator_id = $1 AND status = 'active'`,
+            [coordinatorId]
+        );
+        const zoneIds = zonesResult.rows.map(r => r.zone_id);
+        if (zoneIds.length === 0) return res.json([]);
+        // Get all volunteers assigned to these zones
+        const volunteersResult = await db.query(
+            `SELECT vda.*, u.full_name, u.email, u.phone, u.organization_id, z.name AS zone_name
+             FROM volunteer_disaster_assignments vda
+             JOIN users u ON u.id = vda.volunteer_id
+             JOIN zones z ON z.id = vda.zone_id
+             WHERE vda.zone_id = ANY($1::uuid[]) AND vda.status = 'accepted'`,
+            [zoneIds]
+        );
+        res.json(volunteersResult.rows);
+    } catch (err) {
+        console.error('[coordinator/my-zone-volunteers] error:', err);
+        res.status(500).json({ message: 'Failed to fetch volunteers for your zones' });
+    }
+}
+// GET /api/v1/coordinator/my-zones
+// Returns all zones where the coordinator is assigned (primary or backup)
+async function getMyZones(req, res) {
+    try {
+        const { userId } = req.auth || {};
+        if (!userId) return res.status(401).json({ message: 'Not authenticated' });
+        // Find coordinator's DB id
+        const dbUser = await db.query('SELECT id FROM users WHERE clerk_user_id = $1', [userId]);
+        const coordinatorId = dbUser.rows[0]?.id;
+        if (!coordinatorId) return res.status(404).json({ message: 'Coordinator not found' });
+        // Get all active assignments for this coordinator
+        const assignments = await db.query(
+            `SELECT dca.*, z.*, d.name AS disaster_name, d.type AS disaster_type
+             FROM disaster_coordinator_assignments dca
+             JOIN zones z ON z.id = dca.zone_id
+             JOIN disasters d ON d.id = z.disaster_id
+             WHERE dca.coordinator_id = $1 AND dca.status = 'active'`,
+            [coordinatorId]
+        );
+        res.json(assignments.rows);
+    } catch (err) {
+        console.error('[coordinator/my-zones] error:', err);
+        res.status(500).json({ message: 'Failed to fetch assigned zones' });
+    }
+}
 const db = require('../config/db');
 const { ensureUserInDb } = require('../utils/userSync');
 
@@ -172,10 +229,13 @@ async function getSos(req, res) {
                     ST_Y(s.location::geometry) AS lat,
                     COALESCE(rep.full_name, 'Unknown Reporter') AS reporter_name,
                     COALESCE(rep.phone, 'No Phone') AS reporter_phone,
-                    COALESCE(ack.full_name, 'Unassigned') AS volunteer_name
+                    COALESCE(ack.full_name, 'Unassigned') AS volunteer_name,
+                    av.full_name AS assigned_volunteer_name,
+                    s.assigned_volunteer_id
              FROM sos_alerts s
              LEFT JOIN users rep ON s.reporter_id = rep.id
              LEFT JOIN users ack ON s.acknowledged_by = ack.id
+             LEFT JOIN users av  ON s.assigned_volunteer_id = av.id
              ORDER BY s.created_at DESC
              LIMIT 200`
         );
@@ -307,4 +367,6 @@ module.exports = {
     markMissingFound,
     reassignTask,
     getZones,
+    getMyZones,
+    getMyZoneVolunteers,
 };
