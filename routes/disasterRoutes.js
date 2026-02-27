@@ -16,6 +16,7 @@ router.post('/:id/resolve', verifyToken, checkRole('admin'), validators.uuidPara
 // Read endpoints
 router.get('/', verifyToken, checkRole(), disasterController.listDisasters);
 router.get('/:id', verifyToken, checkRole(), validators.uuidParam, disasterController.getDisasterById);
+router.get('/:id/report', verifyToken, checkRole(), validators.uuidParam, disasterController.getDisasterReport);
 router.get('/:id/stats', verifyToken, checkRole('admin'), validators.uuidParam, disasterController.getDisasterStats);
 router.get('/:id/tasks', verifyToken, checkRole('admin'), validators.uuidParam, disasterController.getDisasterTasks);
 
@@ -30,4 +31,3 @@ router.post('/:id/requests', verifyToken, checkRole('admin'), drController.creat
 router.get('/:id/requests', verifyToken, checkRole('admin'), drController.listRequests);
 
 module.exports = router;
-

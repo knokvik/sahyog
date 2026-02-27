@@ -203,6 +203,66 @@ async function getDisasterTasks(req, res) {
   }
 }
 
+// GET /api/v1/disasters/:id/report
+async function getDisasterReport(req, res) {
+  try {
+    const { id } = req.params;
+
+    const disaster = await db.query(
+      `SELECT id, name, type, status, activated_at, resolved_at
+       FROM disasters
+       WHERE id = $1`,
+      [id]
+    );
+    if (disaster.rows.length === 0) {
+      return res.status(404).json({ message: 'Disaster not found' });
+    }
+
+    const metrics = await db.query(
+      `WITH task_metrics AS (
+         SELECT
+           COUNT(*) FILTER (WHERE status = 'completed')::int AS completed_count,
+           COUNT(*) FILTER (
+             WHERE status IN ('pending', 'accepted', 'in_progress')
+               AND EXTRACT(EPOCH FROM (NOW() - created_at)) / 60 > 30
+           )::int AS escalation_count,
+           AVG(EXTRACT(EPOCH FROM (COALESCE(check_in_time, completed_at, NOW()) - created_at)) / 60)
+             FILTER (WHERE status IN ('accepted', 'in_progress', 'completed')) AS avg_response_time,
+           COUNT(*) FILTER (
+             WHERE status = 'completed'
+               AND EXTRACT(EPOCH FROM (COALESCE(completed_at, NOW()) - created_at)) / 60 <= 30
+           )::int AS sla_ok_count
+         FROM tasks
+         WHERE disaster_id = $1
+       )
+       SELECT
+         (SELECT COUNT(*)::int FROM needs WHERE disaster_id = $1) AS total_needs,
+         (SELECT COUNT(DISTINCT volunteer_id)::int FROM tasks WHERE disaster_id = $1 AND volunteer_id IS NOT NULL) AS total_volunteers,
+         COALESCE((SELECT avg_response_time FROM task_metrics), 0)::numeric(10,2) AS avg_response_time,
+         COALESCE((SELECT escalation_count FROM task_metrics), 0)::int AS escalation_count,
+         CASE
+           WHEN COALESCE((SELECT completed_count FROM task_metrics), 0) = 0 THEN 100
+           ELSE ROUND(
+             (COALESCE((SELECT sla_ok_count FROM task_metrics), 0)::numeric /
+              NULLIF((SELECT completed_count FROM task_metrics), 0)::numeric) * 100, 2
+           )
+         END AS sla_compliance_pct`,
+      [id]
+    );
+
+    res.json({
+      disaster_id: disaster.rows[0].id,
+      disaster_name: disaster.rows[0].name,
+      disaster_type: disaster.rows[0].type,
+      disaster_status: disaster.rows[0].status,
+      ...metrics.rows[0],
+    });
+  } catch (err) {
+    console.error('Error generating disaster report:', err);
+    res.status(500).json({ message: 'Failed to generate disaster report' });
+  }
+}
+
 module.exports = {
   createDisaster,
   listDisasters,
@@ -212,4 +272,5 @@ module.exports = {
   resolveDisaster,
   getDisasterStats,
   getDisasterTasks,
+  getDisasterReport,
 };

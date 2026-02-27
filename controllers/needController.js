@@ -40,6 +40,31 @@ async function listNeeds(req, res) {
     }
 }
 
+// GET /api/v1/needs/active
+async function listActiveNeeds(req, res) {
+    try {
+        const result = await db.query(
+            `SELECT *,
+                    ST_X(location::geometry) AS lng,
+                    ST_Y(location::geometry) AS lat,
+                    CASE LOWER(COALESCE(urgency, 'medium'))
+                      WHEN 'critical' THEN 100
+                      WHEN 'high' THEN 80
+                      WHEN 'medium' THEN 50
+                      WHEN 'low' THEN 20
+                      ELSE 40
+                    END AS urgency_score
+             FROM needs
+             WHERE status NOT IN ('resolved', 'cancelled')
+             ORDER BY reported_at DESC`
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Error listing active needs:', err);
+        res.status(500).json({ message: 'Failed to list active needs' });
+    }
+}
+
 async function assignVolunteer(req, res) {
     try {
         const { id } = req.params;
@@ -112,4 +137,10 @@ async function resolveNeed(req, res) {
     }
 }
 
-module.exports = { createNeed, listNeeds, assignVolunteer, resolveNeed };
+module.exports = {
+    createNeed,
+    listNeeds,
+    listActiveNeeds,
+    assignVolunteer,
+    resolveNeed,
+};

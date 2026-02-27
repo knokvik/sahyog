@@ -227,14 +227,14 @@ async function updateTaskStatus(req, res) {
     // Allow acceptance if it's currently unassigned and status is pending
     if (status === 'accepted' && !task.volunteer_id && task.status === 'pending' && role === 'volunteer') {
       // Validate volunteer can accept this task
-      
+
       // 1. Check volunteer has required skills for task type
       const volunteerSkills = await db.query(
         'SELECT skills FROM volunteers WHERE user_id = $1',
         [currentUser.id]
       );
       const skills = volunteerSkills.rows[0]?.skills || [];
-      
+
       // Define required skills for critical task types
       const criticalTaskTypes = ['medical', 'rescue', 'fire', 'evacuation'];
       if (criticalTaskTypes.includes(task.type) && !skills.includes(task.type)) {
@@ -244,14 +244,14 @@ async function updateTaskStatus(req, res) {
           your_skills: skills
         });
       }
-      
+
       // 2. Check volunteer is within reasonable distance (50km max)
       if (task.meeting_point) {
         const volunteerLocation = await db.query(
           'SELECT current_location FROM users WHERE id = $1',
           [currentUser.id]
         );
-        
+
         if (volunteerLocation.rows[0]?.current_location) {
           const distanceResult = await db.query(
             `SELECT ST_Distance(
@@ -260,10 +260,10 @@ async function updateTaskStatus(req, res) {
             ) / 1000 as distance_km`,
             [volunteerLocation.rows[0].current_location, task.meeting_point]
           );
-          
+
           const distanceKm = distanceResult.rows[0]?.distance_km;
           const MAX_ACCEPTANCE_DISTANCE_KM = 50;
-          
+
           if (distanceKm > MAX_ACCEPTANCE_DISTANCE_KM) {
             return res.status(403).json({
               message: `You are too far from this task location (${Math.round(distanceKm)}km away). Maximum distance is ${MAX_ACCEPTANCE_DISTANCE_KM}km.`,
@@ -273,14 +273,14 @@ async function updateTaskStatus(req, res) {
           }
         }
       }
-      
+
       // 3. Check volunteer isn't already overloaded (max 3 active tasks)
       const activeTaskCount = await db.query(
         `SELECT COUNT(*) as count FROM tasks 
          WHERE volunteer_id = $1 AND status IN ('pending', 'accepted', 'in_progress')`,
         [currentUser.id]
       );
-      
+
       const MAX_ACTIVE_TASKS = 3;
       if (parseInt(activeTaskCount.rows[0].count) >= MAX_ACTIVE_TASKS) {
         return res.status(403).json({
@@ -289,7 +289,7 @@ async function updateTaskStatus(req, res) {
           max_tasks: MAX_ACTIVE_TASKS
         });
       }
-      
+
     } else if (role === 'volunteer' && task.volunteer_id !== currentUser.id) {
       return res.status(403).json({ message: 'Volunteers can update only their own tasks' });
     }
@@ -309,6 +309,16 @@ async function updateTaskStatus(req, res) {
     if (proof_images) {
       updateFields.push(`proof_images = $${idx++}`);
       values.push(proof_images);
+    }
+
+    // Require proof images from volunteers when completing a task
+    if (status === 'completed' && role === 'volunteer') {
+      if (!proof_images || !Array.isArray(proof_images) || proof_images.length === 0) {
+        return res.status(400).json({
+          message: 'Proof images are required to mark a task as completed. Upload at least one photo as evidence.',
+          code: 'PROOF_REQUIRED',
+        });
+      }
     }
 
     if (status === 'completed') {
@@ -361,7 +371,7 @@ async function updateTaskStatus(req, res) {
       // Emit notification that task is complete but SOS needs manual resolution
       const io = req.app.get('io');
       if (io) {
-        io.emit('task_completed_sos_pending', { 
+        io.emit('task_completed_sos_pending', {
           task_id: updatedTask.id,
           sos_id: updatedTask.sos_id,
           message: 'Task completed. SOS requires coordinator review for resolution.'
@@ -394,14 +404,14 @@ async function voteTaskCompletion(req, res) {
 
     const task = await loadTask(id);
     if (!task) return res.status(404).json({ message: 'Task not found' });
-    
+
     // Prevent volunteers from voting on their own tasks
     if (task.volunteer_id === currentUser.id) {
-      return res.status(403).json({ 
-        message: 'You cannot vote on completion of your own task. Other volunteers or coordinators must verify your work.' 
+      return res.status(403).json({
+        message: 'You cannot vote on completion of your own task. Other volunteers or coordinators must verify your work.'
       });
     }
-    
+
     // Prevent voting on tasks that aren't in 'completed' status awaiting verification
     if (task.status !== 'completed' && vote === 'completed') {
       return res.status(400).json({
@@ -512,6 +522,109 @@ async function getTaskVotes(req, res) {
   }
 }
 
+// GET /api/v1/tasks/escalated
+async function listEscalatedTasks(req, res) {
+  try {
+    const { zone, coordinator } = req.query || {};
+    const delayThresholdMinutes = 30;
+    const params = [delayThresholdMinutes];
+    let idx = 2;
+
+    let where = `
+      WHERE t.status IN ('pending', 'accepted', 'in_progress')
+        AND EXTRACT(EPOCH FROM (NOW() - t.created_at)) / 60 > $1
+    `;
+
+    if (zone) {
+      where += ` AND (CAST(t.zone_id AS text) = $${idx} OR z.name ILIKE $${idx + 1})`;
+      params.push(zone, `%${zone}%`);
+      idx += 2;
+    }
+
+    if (coordinator) {
+      where += ` AND (CAST(t.assigned_by AS text) = $${idx} OR c.full_name ILIKE $${idx + 1})`;
+      params.push(coordinator, `%${coordinator}%`);
+      idx += 2;
+    }
+
+    const result = await db.query(
+      `SELECT
+         t.id AS task_id,
+         t.status,
+         t.created_at AS assigned_at,
+         z.id AS zone_id,
+         z.name AS zone_name,
+         t.volunteer_id,
+         u.full_name AS volunteer_name,
+         t.assigned_by AS coordinator_id,
+         c.full_name AS coordinator_name,
+         FLOOR(EXTRACT(EPOCH FROM (NOW() - t.created_at)) / 60)::int AS delay_minutes,
+         CASE
+           WHEN t.status = 'pending' THEN 'Task pending beyond SLA'
+           WHEN t.status = 'accepted' THEN 'Accepted but not started'
+           WHEN t.status = 'in_progress' THEN 'Long-running task'
+           ELSE 'SLA breach'
+         END AS escalation_reason
+       FROM tasks t
+       LEFT JOIN zones z ON z.id = t.zone_id
+       LEFT JOIN users u ON u.id = t.volunteer_id
+       LEFT JOIN users c ON c.id = t.assigned_by
+       ${where}
+       ORDER BY delay_minutes DESC, t.created_at ASC
+       LIMIT 500`,
+      params
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error listing escalated tasks:', err);
+    res.status(500).json({ message: 'Failed to list escalated tasks' });
+  }
+}
+
+// POST /api/v1/admin/workflows/reassign-tasks
+async function reassignTasksFromInactiveCoordinator(req, res) {
+  try {
+    const { inactiveCoordinatorId, targetCoordinatorId } = req.body || {};
+    if (!inactiveCoordinatorId || !targetCoordinatorId) {
+      return res
+        .status(400)
+        .json({ message: 'inactiveCoordinatorId and targetCoordinatorId are required' });
+    }
+    if (inactiveCoordinatorId === targetCoordinatorId) {
+      return res
+        .status(400)
+        .json({ message: 'inactiveCoordinatorId and targetCoordinatorId must be different' });
+    }
+
+    const taskUpdate = await db.query(
+      `UPDATE tasks
+       SET assigned_by = $2
+       WHERE assigned_by = $1
+         AND status IN ('pending', 'accepted', 'in_progress')
+       RETURNING id`,
+      [inactiveCoordinatorId, targetCoordinatorId]
+    );
+
+    const zoneUpdate = await db.query(
+      `UPDATE zones
+       SET assigned_coordinator_id = $2
+       WHERE assigned_coordinator_id = $1
+       RETURNING id`,
+      [inactiveCoordinatorId, targetCoordinatorId]
+    );
+
+    res.json({
+      message: 'Tasks reassigned successfully',
+      reassigned_tasks_count: taskUpdate.rows.length,
+      reassigned_zones_count: zoneUpdate.rows.length,
+    });
+  } catch (err) {
+    console.error('Error reassigning tasks:', err);
+    res.status(500).json({ message: 'Failed to reassign tasks' });
+  }
+}
+
 async function requestHelp(req, res) {
   try {
     const { id } = req.params;
@@ -546,10 +659,12 @@ async function requestHelp(req, res) {
 
 module.exports = {
   createTask,
+  listEscalatedTasks,
   listPendingTasks,
   listTaskHistory,
   updateTaskStatus,
   voteTaskCompletion,
   getTaskVotes,
+  reassignTasksFromInactiveCoordinator,
   requestHelp,
 };

@@ -20,6 +20,8 @@ const checkRole = (requiredRole) => {
         'volunteer': 'volunteer',
         'coordinator': 'coordinator',
         'admin': 'admin',
+        'ngo_admin': 'admin',
+        'district_admin': 'admin',
         'organization': 'organization',
         'org:user': 'volunteer',
         'org:volunteer': 'volunteer',
@@ -51,11 +53,13 @@ const checkRole = (requiredRole) => {
       }
 
       if (requiredRole) {
-        let normalizedReqRole = dbToAppRole[requiredRole] || requiredRole;
-        if (role !== normalizedReqRole) {
+        const requiredRoles = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
+        const normalizedRequiredRoles = requiredRoles.map(r => dbToAppRole[r] || r);
+
+        if (!normalizedRequiredRoles.includes(role)) {
           return res
             .status(403)
-            .json({ message: `Access denied. Requires ${normalizedReqRole} role.` });
+            .json({ message: `Access denied. Requires one of: ${normalizedRequiredRoles.join(', ')}` });
         }
       }
 

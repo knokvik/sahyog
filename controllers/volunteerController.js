@@ -172,6 +172,114 @@ async function getVolunteerById(req, res) {
   }
 }
 
+// GET /api/v1/volunteers/available (Coordinator/Admin)
+async function listAvailableVolunteers(req, res) {
+  try {
+    const { org_id } = req.query;
+    const currentUser = req.dbUser;
+
+    // If no org_id provided, default to current user's org
+    const targetOrgId = org_id || currentUser?.organization_id;
+
+    if (!targetOrgId) {
+      return res.status(400).json({ message: 'organization_id is required' });
+    }
+
+    // Define exhaustion limit (max 3 active tasks)
+    const MAX_ACTIVE_TASKS = 3;
+
+    const result = await db.query(
+      `SELECT u.id, u.full_name, u.email, u.phone, u.avatar_url,
+              ST_X(u.current_location::geometry) AS lng,
+              ST_Y(u.current_location::geometry) AS lat,
+              (SELECT COUNT(*) FROM tasks t 
+               WHERE t.volunteer_id = u.id AND t.status IN ('pending', 'accepted', 'in_progress')) as active_tasks
+       FROM users u
+       WHERE u.organization_id = $1 
+         AND u.role = 'volunteer'
+         AND u.is_active = true
+       HAVING (SELECT COUNT(*) FROM tasks t 
+               WHERE t.volunteer_id = u.id AND t.status IN ('pending', 'accepted', 'in_progress')) < $2
+       ORDER BY active_tasks ASC, u.full_name ASC`,
+      [targetOrgId, MAX_ACTIVE_TASKS]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error listing available volunteers:', err);
+    res.status(500).json({ message: 'Failed to list available volunteers' });
+  }
+}
+
+// GET /api/v1/volunteers/locations
+async function listVolunteerLocations(req, res) {
+  try {
+    const result = await db.query(
+      `SELECT
+         u.id,
+         u.full_name,
+         u.role,
+         u.is_active,
+         u.last_active,
+         ST_X(u.current_location::geometry) AS lng,
+         ST_Y(u.current_location::geometry) AS lat,
+         z.name AS zone_name
+       FROM users u
+       LEFT JOIN LATERAL (
+         SELECT z2.name
+         FROM tasks t2
+         LEFT JOIN zones z2 ON z2.id = t2.zone_id
+         WHERE t2.volunteer_id = u.id
+           AND t2.status IN ('pending', 'accepted', 'in_progress')
+         ORDER BY t2.created_at DESC
+         LIMIT 1
+       ) z ON TRUE
+       WHERE u.role IN ('volunteer', 'coordinator')
+         AND u.current_location IS NOT NULL
+       ORDER BY u.last_active DESC NULLS LAST`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error listing volunteer locations:', err);
+    res.status(500).json({ message: 'Failed to list volunteer locations' });
+  }
+}
+
+// PATCH /api/v1/admin/workflows/volunteers/:id/deactivate
+async function deactivateVolunteer(req, res) {
+  try {
+    const { id } = req.params;
+    const result = await db.query(
+      `UPDATE users
+       SET is_active = false,
+           updated_at = NOW()
+       WHERE id = $1
+         AND role = 'volunteer'
+       RETURNING id, full_name, email, role, is_active`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Volunteer not found' });
+    }
+
+    // Best effort sync with volunteers table for older deployments
+    try {
+      await db.query(
+        `UPDATE volunteers
+         SET is_available = false
+         WHERE user_id = $1`,
+        [id]
+      );
+    } catch (_) {}
+
+    res.json({ message: 'Volunteer deactivated', volunteer: result.rows[0] });
+  } catch (err) {
+    console.error('Error deactivating volunteer:', err);
+    res.status(500).json({ message: 'Failed to deactivate volunteer' });
+  }
+}
+
 module.exports = {
   registerVolunteer,
   verifyVolunteer,
@@ -180,5 +288,7 @@ module.exports = {
   getMyTasks,
   listVolunteers,
   getVolunteerById,
+  listAvailableVolunteers,
+  listVolunteerLocations,
+  deactivateVolunteer,
 };
-

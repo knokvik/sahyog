@@ -13,6 +13,7 @@ const serverRoutes = require('./routes/serverRoutes');
 const searchRoutes = require('./routes/searchRoutes');
 const organizationRoutes = require('./routes/organizationRoutes');
 const sosRoutes = require('./routes/sosRoutes');
+const volunteerRoutes = require('./routes/volunteerRoutes');
 
 const { Server } = require('socket.io');
 const http = require('http');
@@ -76,9 +77,11 @@ app.use('/api/users', userRoutes);
 app.use('/api/v1/needs', needRoutes);
 app.use('/api/v1/zones', zoneRoutes);
 app.use('/api/v1/coordinator', require('./routes/coordinatorRoutes'));
+app.use('/api/v1/coordinators', require('./routes/coordinatorsRoutes'));
 app.use('/api/v1/tasks', taskRoutes);
 app.use('/api/v1/disasters', disasterRoutes);
 app.use('/api/v1/resources', resourceRoutes);
+app.use('/api/v1/volunteers', volunteerRoutes);
 app.use('/api/v1/missing', missingRoutes);
 app.use('/api/v1/server', serverRoutes);
 app.use('/api/v1/search', searchRoutes);
@@ -86,6 +89,8 @@ app.use('/api/v1/organizations', organizationRoutes);
 app.use('/api/v1/sos', sosRoutes);
 app.use('/api/v1/twilio', require('./routes/twilioRoutes'));
 app.use('/api/v1/volunteer-assignments', require('./routes/volunteerAssignmentRoutes'));
+app.use('/api/v1/admin/workflows', require('./routes/adminWorkflowRoutes'));
+app.use('/api/v1/uploads', require('./routes/uploadRoutes'));
 
 // Error Handling Middleware
 app.use(notFound);
