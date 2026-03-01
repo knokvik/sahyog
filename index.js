@@ -14,6 +14,13 @@ const searchRoutes = require('./routes/searchRoutes');
 const organizationRoutes = require('./routes/organizationRoutes');
 const sosRoutes = require('./routes/sosRoutes');
 const volunteerRoutes = require('./routes/volunteerRoutes');
+const locationRoutes = require('./routes/locationRoutes');
+const locationService = require('./services/location.service');
+const {
+    startHeatmapEmitter,
+    stopHeatmapEmitter,
+    emitLatestToSocket,
+} = require('./services/heatmapRealtime.service');
 
 const { Server } = require('socket.io');
 const http = require('http');
@@ -38,10 +45,55 @@ const io = new Server(server, {
 // Configure Socket connections
 io.on('connection', (socket) => {
     console.log('Client connected to Socket.io:', socket.id);
+    emitLatestToSocket(socket);
+
+    socket.on('location.update', async (data) => {
+        try {
+            const { userId, role, lat, lng, name } = data;
+            if (userId && role && lat !== undefined && lng !== undefined) {
+                await locationService.updateLocation(userId, role, lat, lng, name);
+            }
+        } catch (err) {
+            console.error('Socket location update error:', err.message);
+        }
+    });
+
     socket.on('disconnect', () => {
         console.log('Client disconnected:', socket.id);
     });
 });
+
+// Setup Redis subscriber to emit via Socket.io
+const setupRedisSub = async () => {
+    try {
+        const { createClient } = require('redis');
+        const subClient = createClient({ url: process.env.REDIS_URL || 'redis://127.0.0.1:6379' });
+
+        await subClient.connect();
+        await subClient.subscribe('location:updates', (message) => {
+            try {
+                const data = JSON.parse(message);
+
+                // Emit full data on admin channel (for coordinator dashboards)
+                io.emit('location.update.admin', data);
+
+                // Emit sanitized data on public channel
+                const publicData = { ...data };
+                if (publicData.userId) {
+                    publicData.userId = publicData.userId.substring(0, 4) + '***';
+                }
+                io.emit('location.update', publicData);
+            } catch (e) {
+                console.error('Error parsing redis message', e);
+            }
+        });
+        console.log('✅ Redis subscriber listening on location:updates');
+    } catch (err) {
+        console.error('Redis Subscribe Error (non-fatal):', err.message);
+    }
+};
+
+setupRedisSub();
 
 // Make io accessible to our router
 app.set('io', io);
@@ -91,6 +143,7 @@ app.use('/api/v1/twilio', require('./routes/twilioRoutes'));
 app.use('/api/v1/volunteer-assignments', require('./routes/volunteerAssignmentRoutes'));
 app.use('/api/v1/admin/workflows', require('./routes/adminWorkflowRoutes'));
 app.use('/api/v1/uploads', require('./routes/uploadRoutes'));
+app.use('/api/v1/locations', locationRoutes);
 
 // Error Handling Middleware
 app.use(notFound);
@@ -99,4 +152,13 @@ app.use(errorHandler);
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server & Socket.io running in ${process.env.NODE_ENV} mode on port ${PORT} at 0.0.0.0`);
     console.log(`✅ Clerk Auth Initialized`);
+    startHeatmapEmitter(io);
 });
+
+const gracefulShutdown = () => {
+    stopHeatmapEmitter();
+    process.exit(0);
+};
+
+process.on('SIGINT', gracefulShutdown);
+process.on('SIGTERM', gracefulShutdown);
