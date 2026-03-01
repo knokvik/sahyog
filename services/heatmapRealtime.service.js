@@ -9,6 +9,7 @@ const CELL_PRECISION = Number(process.env.HEATMAP_CELL_PRECISION || 3);
 const GEO_RADIUS_KM = Number(process.env.HEATMAP_RADIUS_KM || 0.6);
 const GEO_RADIUS_MAX = Number(process.env.HEATMAP_RADIUS_MAX || 300);
 const SHELTER_CACHE_MS = Number(process.env.HEATMAP_SHELTER_CACHE_MS || 60000);
+const DB_FALLBACK_CACHE_MS = Number(process.env.HEATMAP_DB_FALLBACK_CACHE_MS || 5000);
 const EVENT_NAME = 'heatmap:update';
 
 const ROLE_BASE_SEVERITY = {
@@ -17,6 +18,8 @@ const ROLE_BASE_SEVERITY = {
   volunteer: 5,
   coordinator: 7,
   admin: 8,
+  ngo_admin: 8,
+  district_admin: 8,
 };
 
 let redisClient;
@@ -24,6 +27,8 @@ let emitTimer;
 let emitInFlight = false;
 let sheltersCache = [];
 let sheltersLastLoadedAt = 0;
+let dbFallbackCache = [];
+let dbFallbackLastLoadedAt = 0;
 
 let latestSnapshot = {
   updatedAt: new Date().toISOString(),
@@ -93,8 +98,12 @@ async function ensureRedis() {
 async function listLocationKeys(client) {
   if (typeof client.scanIterator === 'function') {
     const keys = [];
-    for await (const key of client.scanIterator({ MATCH: LOCATION_KEY_MATCH, COUNT: 250 })) {
-      keys.push(key);
+    for await (const batch of client.scanIterator({ MATCH: LOCATION_KEY_MATCH, COUNT: 250 })) {
+      if (Array.isArray(batch)) {
+        keys.push(...batch.filter((key) => typeof key === 'string'));
+      } else if (typeof batch === 'string') {
+        keys.push(batch);
+      }
     }
     return keys;
   }
@@ -103,6 +112,7 @@ async function listLocationKeys(client) {
 }
 
 async function fetchLiveLocations(client) {
+  if (!client) return [];
   const keys = await listLocationKeys(client);
   if (!keys.length) return [];
 
@@ -113,6 +123,7 @@ async function fetchLiveLocations(client) {
 }
 
 async function georadiusCount(client, lat, lng) {
+  if (!client) return 0;
   try {
     const args = [
       GEO_KEY,
@@ -129,6 +140,82 @@ async function georadiusCount(client, lat, lng) {
     console.error('[heatmap] GEORADIUS failed:', err?.message || err);
     return 0;
   }
+}
+
+async function fetchDbFallbackLocations() {
+  const now = Date.now();
+  if (now - dbFallbackLastLoadedAt < DB_FALLBACK_CACHE_MS) {
+    return dbFallbackCache;
+  }
+
+  let userRows = [];
+  let sosRows = [];
+
+  try {
+    const usersResult = await db.query(
+      `SELECT ST_Y(u.current_location::geometry) AS lat,
+              ST_X(u.current_location::geometry) AS lng,
+              u.role
+       FROM users u
+       WHERE u.current_location IS NOT NULL
+         AND COALESCE(u.is_active, true) = true
+       LIMIT 1000`
+    );
+    userRows = usersResult.rows;
+  } catch (err) {
+    console.warn('[heatmap] users fallback query failed:', err?.message || err);
+  }
+
+  try {
+    const sosResult = await db.query(
+      `SELECT ST_Y(s.location::geometry) AS lat,
+              ST_X(s.location::geometry) AS lng
+       FROM sos_alerts s
+       WHERE s.location IS NOT NULL
+         AND COALESCE(s.status, 'triggered') NOT IN ('resolved', 'cancelled')
+       ORDER BY s.created_at DESC
+       LIMIT 500`
+    );
+    sosRows = sosResult.rows;
+  } catch (err) {
+    // Some deployments may not have sos_alerts yet; keep this non-fatal.
+    console.warn('[heatmap] sos fallback query failed:', err?.message || err);
+  }
+
+  const normalizedUsers = userRows
+    .map((row) => {
+      const lat = Number(row.lat);
+      const lng = Number(row.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+      const role = String(row.role || '').toLowerCase();
+      return {
+        lat,
+        lng,
+        count: 1,
+        severity: clampSeverity(ROLE_BASE_SEVERITY[role] || 4),
+      };
+    })
+    .filter(Boolean);
+
+  const normalizedSos = sosRows
+    .map((row) => {
+      const lat = Number(row.lat);
+      const lng = Number(row.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+      return {
+        lat,
+        lng,
+        count: 2,
+        severity: 9,
+      };
+    })
+    .filter(Boolean);
+
+  dbFallbackCache = [...normalizedUsers, ...normalizedSos];
+  dbFallbackLastLoadedAt = now;
+  return dbFallbackCache;
 }
 
 async function fetchShelters() {
@@ -174,11 +261,20 @@ async function fetchShelters() {
 }
 
 async function buildSnapshot() {
-  const client = await ensureRedis();
-  const [locations, shelters] = await Promise.all([
+  let client = null;
+  try {
+    client = await ensureRedis();
+  } catch (err) {
+    console.warn('[heatmap] Redis unavailable, using DB fallback only:', err?.message || err);
+  }
+
+  const [redisLocations, dbFallbackLocations, shelters] = await Promise.all([
     fetchLiveLocations(client),
+    fetchDbFallbackLocations(),
     fetchShelters(),
   ]);
+
+  const locations = [...redisLocations, ...dbFallbackLocations];
 
   if (!locations.length) {
     return {
