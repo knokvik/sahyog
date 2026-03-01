@@ -2,6 +2,7 @@ const { logError } = require('../utils/errors');
 
 const notFound = (req, res, next) => {
     const error = new Error(`Not Found - ${req.originalUrl}`);
+    error.statusCode = 404;
     res.status(404);
     next(error);
 };

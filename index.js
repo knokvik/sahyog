@@ -112,6 +112,7 @@ app.use(requestLogger);
 app.get('/', (req, res) => {
     res.json({ message: "Welcome to Sahyog Backend API (Clerk + Postgres)" });
 });
+app.get('/favicon.ico', (req, res) => res.status(204).end());
 
 // Health check route - using app.use for Express 5 compatibility
 const healthRouter = express.Router();
