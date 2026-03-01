@@ -140,6 +140,8 @@ app.use('/api/v1/search', searchRoutes);
 app.use('/api/v1/organizations', organizationRoutes);
 app.use('/api/v1/sos', sosRoutes);
 app.use('/api/v1/mesh', require('./routes/meshRoutes'));
+app.use('/api/v1/orchestrator', require('./routes/orchestratorRoutes'));
+app.use('/api/v1/beacon', require('./routes/beaconRoutes'));
 app.use('/api/v1/twilio', require('./routes/twilioRoutes'));
 app.use('/api/v1/volunteer-assignments', require('./routes/volunteerAssignmentRoutes'));
 app.use('/api/v1/admin/workflows', require('./routes/adminWorkflowRoutes'));
