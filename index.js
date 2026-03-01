@@ -78,12 +78,8 @@ const setupRedisSub = async () => {
                 // Emit full data on admin channel (for coordinator dashboards)
                 io.emit('location.update.admin', data);
 
-                // Emit sanitized data on public channel
-                const publicData = { ...data };
-                if (publicData.userId) {
-                    publicData.userId = publicData.userId.substring(0, 4) + '***';
-                }
-                io.emit('location.update', publicData);
+                // Emit data on public channel
+                io.emit('location.update', data);
             } catch (e) {
                 console.error('Error parsing redis message', e);
             }

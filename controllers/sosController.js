@@ -11,127 +11,33 @@ async function createSos(req, res) {
     }
 
     const user = await ensureUserInDb(userId);
-    const { lat: rawLat, lng: rawLng, type, description, mediaUrls, disasterId, peopleCount, hasVulnerable, client_uuid, source, hop_count } = req.body;
-
-    // Accept both number and string-encoded numbers (SQLite serialises floats as strings)
-    const lat = typeof rawLat === 'number' ? rawLat : parseFloat(rawLat);
-    const lng = typeof rawLng === 'number' ? rawLng : parseFloat(rawLng);
-
-    if (isNaN(lat) || isNaN(lng)) {
-      return res.status(400).json({ message: 'lat and lng must be valid numbers' });
-    }
-
-    const now = new Date();
-    const priority = calculatePriority({
-      type,
-      peopleCount,
-      hasVulnerable,
-      createdAt: now,
-    });
-
-    let result;
-
-    if (client_uuid) {
-      // ── UPSERT mode: Exactly-once delivery ──
-      // If client_uuid already exists, update the existing record instead of creating a duplicate.
-      // This ensures idempotent retry from the offline sync engine.
-      result = await db.query(
-        `INSERT INTO sos_alerts
-         (reporter_id, clerk_reporter_id, disaster_id, location, type, description, priority_score, status, media_urls, created_at, client_uuid, source, hop_count)
-         VALUES (
-           $1,
-           $2,
-           $3,
-           ST_SetSRID(ST_MakePoint($4, $5), 4326),
-           $6,
-           $7,
-           $8,
-           'triggered',
-           $9,
-           $10,
-           $11,
-           $12,
-           $13
-         )
-         ON CONFLICT (client_uuid) DO UPDATE SET
-           location = ST_SetSRID(ST_MakePoint($4, $5), 4326),
-           type = COALESCE(EXCLUDED.type, sos_alerts.type),
-           description = COALESCE(EXCLUDED.description, sos_alerts.description),
-           priority_score = EXCLUDED.priority_score,
-           source = EXCLUDED.source,
-           hop_count = LEAST(EXCLUDED.hop_count, sos_alerts.hop_count)
-         RETURNING *`,
-        [
-          user.id,
-          user.clerk_user_id,
-          disasterId || null,
-          lng,
-          lat,
-          type || null,
-          description || null,
-          priority,
-          mediaUrls || [],
-          now,
-          client_uuid,
-          source || 'direct',
-          parseInt(hop_count) || 0,
-        ]
-      );
-    } else {
-      // ── Legacy mode: No client_uuid, standard insert ──
-      result = await db.query(
-        `INSERT INTO sos_alerts
-         (reporter_id, clerk_reporter_id, disaster_id, location, type, description, priority_score, status, media_urls, created_at)
-         VALUES (
-           $1,
-           $2,
-           $3,
-           ST_SetSRID(ST_MakePoint($4, $5), 4326),
-           $6,
-           $7,
-           $8,
-           'triggered',
-           $9,
-           $10
-         )
-         RETURNING *`,
-        [
-          user.id,
-          user.clerk_user_id,
-          disasterId || null,
-          lng,
-          lat,
-          type || null,
-          description || null,
-          priority,
-          mediaUrls || [],
-          now,
-        ]
-      );
-    }
-
-    const emittedAlert = result.rows[0];
-
-    // Emit real-time socket event — include flat lat/lng for the Live Map
     const io = req.app.get('io');
-    if (io) {
-      io.emit('new_sos_alert', {
-        id: emittedAlert.id,
-        reporter_name: user.full_name,
-        reporter_phone: user.phone,
-        type: emittedAlert.type,
-        status: emittedAlert.status,
-        lat,
-        lng,
-        location: emittedAlert.location,
-        priority: emittedAlert.priority_score,
-        created_at: emittedAlert.created_at,
-      });
+    const orchestrator = require('../services/orchestrator.service');
+
+    // Map mediaUrls array to photo_url if exists
+    let photoUrl = null;
+    if (req.body.mediaUrls && req.body.mediaUrls.length > 0) {
+      photoUrl = req.body.mediaUrls[0];
     }
 
-    res.status(201).json(emittedAlert);
+    const packet = {
+      ...req.body,
+      photo_url: photoUrl,
+      reporter_id: user.id,
+      clerk_reporter_id: user.clerk_user_id,
+      reporter_name: user.full_name,
+      reporter_phone: user.phone
+    };
+
+    const result = await orchestrator.validateAndTriage(packet, io);
+
+    // The flutter app's offline sync engine expects `res.json({ id: 'uuid' })` to mark it synced
+    res.status(201).json({
+      id: result.sos_id,
+      ...result
+    });
   } catch (err) {
-    console.error('Error creating SOS:', err.message, err.stack);
+    console.error('Error creating SOS via orchestrator:', err.message, err.stack);
     res.status(500).json({ message: 'Failed to create SOS', detail: err.message });
   }
 }
