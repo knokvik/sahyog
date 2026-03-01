@@ -27,6 +27,7 @@ const http = require('http');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '0.0.0.0';
 
 // Create HTTP server
 const server = http.createServer(app);
@@ -152,8 +153,8 @@ app.use('/api/v1/locations', locationRoutes);
 app.use(notFound);
 app.use(errorHandler);
 
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server & Socket.io running in ${process.env.NODE_ENV} mode on port ${PORT} at 0.0.0.0`);
+server.listen(PORT, HOST, () => {
+    console.log(`Server & Socket.io running in ${process.env.NODE_ENV} mode on port ${PORT} at ${HOST}`);
     console.log(`✅ Clerk Auth Initialized`);
     startHeatmapEmitter(io);
 });
