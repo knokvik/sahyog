@@ -123,6 +123,10 @@ app.get('/health', (req, res) => res.status(200).send('OK'));
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/users', userRoutes);
 
+app.use('/api/sos', sosRoutes);
+app.use('/api/mesh', require('./routes/meshRoutes'));
+app.use('/api/beacon', require('./routes/beaconRoutes'));
+
 // v1 API as per spec
 app.use('/api/v1/needs', needRoutes);
 app.use('/api/v1/zones', zoneRoutes);
