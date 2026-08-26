@@ -4,15 +4,22 @@ const { Client } = require('pg');
 const projectRef = 'kzxjhjkauvsoipvlusjo';
 const password = 'sahyog876737';
 
+const regions = ['ap-south-1', 'ap-southeast-1', 'us-east-1', 'us-west-1', 'eu-central-1', 'eu-west-1', 'ap-northeast-1'];
 const configs = [
     {
-        name: 'Global Pooler (pooler.supabase.com)',
-        connectionString: `postgresql://postgres.${projectRef}:${password}@pooler.supabase.com:6543/postgres`
+        name: 'Direct Supabase DB (db.kzxjhjkauvsoipvlusjo.supabase.co:5432)',
+        connectionString: `postgresql://postgres:${password}@db.${projectRef}.supabase.co:5432/postgres`
     },
-    {
-        name: 'Global Pooler Session (pooler.supabase.com:5432)',
-        connectionString: `postgresql://postgres.${projectRef}:${password}@pooler.supabase.com:5432/postgres`
-    }
+    ...regions.flatMap(r => [
+        {
+            name: `Pooler Transaction (${r}:6543)`,
+            connectionString: `postgresql://postgres.${projectRef}:${password}@aws-0-${r}.pooler.supabase.com:6543/postgres`
+        },
+        {
+            name: `Pooler Session (${r}:5432)`,
+            connectionString: `postgresql://postgres.${projectRef}:${password}@aws-0-${r}.pooler.supabase.com:5432/postgres`
+        }
+    ])
 ];
 
 async function testAll() {

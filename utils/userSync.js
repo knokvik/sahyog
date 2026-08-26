@@ -1,8 +1,11 @@
 const { clerkClient } = require('@clerk/clerk-sdk-node');
 const db = require('../config/db');
 
+let schemaEnsured = false;
+
 // Ensure the users table has the correct schema (columns and constraints)
 async function ensureUserSchema() {
+  if (schemaEnsured) return;
   try {
     // 1. Add new columns if they don't exist
     await db.query(`
@@ -70,6 +73,7 @@ async function ensureUserSchema() {
     CHECK(role IN('volunteer', 'coordinator', 'admin', 'organization', 'user'));
     `);
     }
+    schemaEnsured = true;
   } catch (err) {
     console.error('[userSync] ensureUserSchema failed (non-critical):', err.message);
   }
