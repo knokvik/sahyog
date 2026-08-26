@@ -54,48 +54,39 @@ async function validateAndTriage(packet, io) {
 
     const isRelayedViaMesh = source === 'mesh_relay' || source === 'mesh';
 
+    const effectiveClientUuid = client_uuid || require('crypto').randomUUID();
+    const isUuid = (str) => typeof str === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+    const validReporterId = isUuid(reporter_id) ? reporter_id : null;
+
     // ── Step 1: Save to DB ───────────────────────────────────────────
 
     let sosAlert;
     try {
-        const insertQuery = client_uuid
-            ? `INSERT INTO sos_alerts
-                (reporter_id, clerk_reporter_id, location, type, description, priority_score, status,
-                 media_urls, created_at, client_uuid, source, hop_count,
-                 relayed_via_mesh, family_contacts, tflite_score, escalation_level)
-                VALUES (
-                    $1, $2,
-                    ST_SetSRID(ST_MakePoint($3, $4), 4326),
-                    $5, $6, $7, 'triggered',
-                    $8, $9, $10, $11, $12, $13,
-                    $14::jsonb, $15, 'pending'
-                )
-                ON CONFLICT (client_uuid) DO UPDATE SET
-                    location = ST_SetSRID(ST_MakePoint($3, $4), 4326),
-                    type = COALESCE(EXCLUDED.type, sos_alerts.type),
-                    description = COALESCE(EXCLUDED.description, sos_alerts.description),
-                    priority_score = EXCLUDED.priority_score,
-                    source = EXCLUDED.source,
-                    hop_count = LEAST(EXCLUDED.hop_count, sos_alerts.hop_count),
-                    relayed_via_mesh = EXCLUDED.relayed_via_mesh,
-                    family_contacts = COALESCE(EXCLUDED.family_contacts, sos_alerts.family_contacts),
-                    tflite_score = COALESCE(EXCLUDED.tflite_score, sos_alerts.tflite_score)
-                RETURNING *`
-            : `INSERT INTO sos_alerts
-                (reporter_id, clerk_reporter_id, location, type, description, priority_score, status,
-                 media_urls, created_at, source, hop_count,
-                 relayed_via_mesh, family_contacts, tflite_score, escalation_level)
-                VALUES (
-                    $1, $2,
-                    ST_SetSRID(ST_MakePoint($3, $4), 4326),
-                    $5, $6, $7, 'triggered',
-                    $8, $9, $11, $12, $13,
-                    $14::jsonb, $15, 'pending'
-                )
-                RETURNING *`;
+        const insertQuery = `INSERT INTO sos_alerts
+            (reporter_id, clerk_reporter_id, location, type, description, priority_score, status,
+             media_urls, created_at, client_uuid, source, hop_count,
+             relayed_via_mesh, family_contacts, tflite_score, escalation_level)
+            VALUES (
+                $1, $2,
+                ST_SetSRID(ST_MakePoint($3, $4), 4326),
+                $5, $6, $7, 'triggered',
+                $8, $9, $10, $11, $12, $13,
+                $14::jsonb, $15, 'pending'
+            )
+            ON CONFLICT (client_uuid) DO UPDATE SET
+                location = ST_SetSRID(ST_MakePoint($3, $4), 4326),
+                type = COALESCE(EXCLUDED.type, sos_alerts.type),
+                description = COALESCE(EXCLUDED.description, sos_alerts.description),
+                priority_score = EXCLUDED.priority_score,
+                source = EXCLUDED.source,
+                hop_count = LEAST(EXCLUDED.hop_count, sos_alerts.hop_count),
+                relayed_via_mesh = EXCLUDED.relayed_via_mesh,
+                family_contacts = COALESCE(EXCLUDED.family_contacts, sos_alerts.family_contacts),
+                tflite_score = COALESCE(EXCLUDED.tflite_score, sos_alerts.tflite_score)
+            RETURNING *`;
 
         const params = [
-            reporter_id || reporter_name || 'Unknown',         // $1
+            validReporterId,                                    // $1
             clerk_reporter_id || null,                          // $2
             lng || 0,                                           // $3
             lat || 0,                                           // $4
@@ -104,7 +95,7 @@ async function validateAndTriage(packet, io) {
             priority,                                           // $7
             photo_url ? [photo_url] : [],                       // $8
             now,                                                // $9
-            ...(client_uuid ? [client_uuid] : []),              // $10 (only for upsert)
+            effectiveClientUuid,                                // $10
             source,                                             // $11
             parseInt(hop_count) || 0,                           // $12
             isRelayedViaMesh,                                   // $13
