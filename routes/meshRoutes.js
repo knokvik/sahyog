@@ -66,6 +66,9 @@ router.post('/sync', async (req, res) => {
                         : JSON.stringify(family_contacts);
                 }
 
+                const isUuid = (str) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+                const validReporterId = isUuid(pkt.reporter_id) ? pkt.reporter_id : null;
+
                 const result = await db.query(
                     `INSERT INTO sos_alerts
            (reporter_id, clerk_reporter_id, location, type, description, priority_score, status,
@@ -88,12 +91,12 @@ router.post('/sync', async (req, res) => {
              family_contacts = COALESCE(EXCLUDED.family_contacts, sos_alerts.family_contacts)
            RETURNING *`,
                     [
-                        reporter_name || 'Mesh Relay User',    // $1: reporter_id (text name for mesh)
-                        null,                                    // $2: clerk_reporter_id (null for mesh)
+                        validReporterId,                         // $1: reporter_id (UUID or null)
+                        pkt.clerk_reporter_id || null,           // $2: clerk_reporter_id
                         lng,                                     // $3
                         lat,                                     // $4
                         type || 'Emergency',                     // $5
-                        description || 'SOS relayed via mesh',   // $6
+                        description || (reporter_name ? `SOS relayed via mesh from ${reporter_name}` : 'SOS relayed via mesh'), // $6
                         priority,                                // $7
                         [],                                      // $8: media_urls
                         now,                                     // $9

@@ -86,11 +86,16 @@ const req = http.request(
     let data = '';
     res.on('data', (chunk) => (data += chunk));
     res.on('end', () => {
-      if (res.statusCode === 200) {
-        console.log('✅ SUCCESS: Signal relayed to server & broadcast via Socket.io!');
-        console.log('📲 Look at your iOS Simulator — red emergency popup will appear immediately!\n');
-      } else {
-        console.log(`⚠️ Server responded with status ${res.statusCode}:`, data);
+      try {
+        const json = JSON.parse(data);
+        if (res.statusCode === 200 && json.synced > 0) {
+          console.log('✅ SUCCESS: Signal saved to PostgreSQL & broadcast live via Socket.io!');
+          console.log('📲 Look at your iOS Simulator — red emergency popup will appear immediately!\n');
+        } else {
+          console.log(`⚠️ Server responded with status ${res.statusCode}:`, json);
+        }
+      } catch (_) {
+        console.log(`Response: ${data}`);
       }
     });
   }
