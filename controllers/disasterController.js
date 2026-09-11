@@ -208,17 +208,18 @@ async function getDisasterReport(req, res) {
   try {
     const { id } = req.params;
 
-    const disaster = await db.query(
+    const disasterResult = await db.query(
       `SELECT id, name, type, status, activated_at, resolved_at
        FROM disasters
        WHERE id = $1`,
       [id]
     );
-    if (disaster.rows.length === 0) {
+    if (disasterResult.rows.length === 0) {
       return res.status(404).json({ message: 'Disaster not found' });
     }
+    const disaster = disasterResult.rows[0];
 
-    const metrics = await db.query(
+    const metricsResult = await db.query(
       `WITH task_metrics AS (
          SELECT
            COUNT(*) FILTER (WHERE status = 'completed')::int AS completed_count,
@@ -250,12 +251,42 @@ async function getDisasterReport(req, res) {
       [id]
     );
 
+    const zonesResult = await db.query(
+      `SELECT severity, COUNT(*)::int as count 
+       FROM zones WHERE disaster_id = $1 GROUP BY severity`,
+      [id]
+    );
+
+    const orgsResult = await db.query(
+      `SELECT o.id, o.name, SUM(c.quantity_committed)::int as total_committed
+       FROM org_request_contributions c
+       JOIN org_request_assignments a ON c.assignment_id = a.id
+       JOIN organizations o ON a.organization_id = o.id
+       JOIN disaster_requests r ON a.request_id = r.id
+       WHERE r.disaster_id = $1
+       GROUP BY o.id, o.name
+       ORDER BY total_committed DESC`,
+      [id]
+    );
+
+    const needsResult = await db.query(
+      `SELECT i.resource_type, 
+              SUM(i.quantity_needed)::int as needed, 
+              SUM(i.quantity_fulfilled)::int as fulfilled
+       FROM disaster_request_items i
+       JOIN disaster_requests r ON i.request_id = r.id
+       WHERE r.disaster_id = $1
+       GROUP BY i.resource_type
+       ORDER BY needed DESC`,
+      [id]
+    );
+
     res.json({
-      disaster_id: disaster.rows[0].id,
-      disaster_name: disaster.rows[0].name,
-      disaster_type: disaster.rows[0].type,
-      disaster_status: disaster.rows[0].status,
-      ...metrics.rows[0],
+      details: disaster,
+      metrics: metricsResult.rows[0] || {},
+      organizations: orgsResult.rows,
+      zones: zonesResult.rows,
+      needs_breakdown: needsResult.rows
     });
   } catch (err) {
     console.error('Error generating disaster report:', err);

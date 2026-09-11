@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const { logActivity } = require('./logger');
 
 /**
  * Sleeps for ms milliseconds (useful for UI tracking visibility)
@@ -102,6 +103,13 @@ async function runOrgAgentSequence(requestId, io) {
                 org_name: orgName,
                 message: `${orgName} opted out (No Send) — skipping.`
             });
+            await logActivity({
+                action_type: 'WARNING',
+                entity_type: 'AGENT',
+                entity_id: requestId,
+                description: `AI Agent skipped organization ${orgName} because their AI preference is set to 'No Send'.`,
+                organization_id: assignment.organization_id
+            });
             await delay(1500);
             return runOrgAgentSequence(requestId, io).catch(console.error);
         }
@@ -153,6 +161,15 @@ async function runOrgAgentSequence(requestId, io) {
             org_name: orgName,
             message: `${orgName} allocated resources successfully.`, 
             contributions 
+        });
+
+        await logActivity({
+            action_type: 'SUCCESS',
+            entity_type: 'AGENT',
+            entity_id: assignment.id,
+            description: `AI Agent successfully allocated resources from ${orgName} using '${preference}' mode.`,
+            organization_id: assignment.organization_id,
+            metadata: { contributions }
         });
 
         // Wait a few seconds so UI can breathe

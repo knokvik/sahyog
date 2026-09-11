@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const { clerkClient } = require('@clerk/clerk-sdk-node');
+const { logActivity } = require('../services/logger');
 
 // ─── Helper: get org_id from logged-in user ────────────────────────
 async function getOrgIdForUser(clerkUserId) {
@@ -435,7 +436,17 @@ async function acceptOrgRequest(req, res) {
             );
         }
 
-        res.json({ message: 'Request accepted successfully' });
+        await logActivity({
+            action_type: 'SUCCESS',
+            entity_type: 'ORGANIZATION',
+            entity_id: assignmentId,
+            description: `Organization manually accepted a disaster request and committed resources.`,
+            organization_id: orgId,
+            user_id: req.user.id,
+            metadata: { contributions }
+        });
+
+        res.json({ message: 'Request accepted and resources committed' });
     } catch (err) {
         console.error('[500] acceptOrgRequest error:', err?.message || err);
         res.status(500).json({ message: 'Failed to accept request' });
@@ -626,6 +637,15 @@ async function updateAiPreference(req, res) {
             `UPDATE organizations SET ai_allocation_preference = $1, updated_at = NOW() WHERE id = $2`,
             [ai_allocation_preference, orgId]
         );
+
+        await logActivity({
+            action_type: 'INFO',
+            entity_type: 'ORGANIZATION',
+            entity_id: orgId,
+            description: `Organization updated their AI Auto-Allocation preference to: ${ai_allocation_preference.toUpperCase()}`,
+            organization_id: orgId,
+            user_id: req.user.id
+        });
 
         res.json({ message: 'AI Preference updated successfully', ai_allocation_preference });
     } catch (err) {

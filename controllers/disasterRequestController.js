@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const aiResourceAgent = require('../services/aiResourceAgent');
+const { logActivity } = require('../services/logger');
 
 // ──────────────────────────────────────────
 // ZONE CRUD (for disaster relief map)
@@ -9,7 +10,7 @@ const aiResourceAgent = require('../services/aiResourceAgent');
 async function createZone(req, res) {
     try {
         const { id: disasterId } = req.params;
-        const { name, severity, center_lng, center_lat, radius_meters } = req.body;
+        const { name, severity, center_lng, center_lat, radius_meters, auto_ai } = req.body;
 
         if (!name) return res.status(400).json({ message: 'Zone name is required' });
         if (!center_lng || !center_lat) return res.status(400).json({ message: 'Center coordinates required' });
@@ -47,11 +48,22 @@ async function createZone(req, res) {
         );
         res.status(201).json(result.rows[0]);
 
-        // Automate resources requirements via AI Agent asynchronously
-        const newZoneId = result.rows[0].id;
-        const io = req.app.get('io');
-        aiResourceAgent.processZoneResources(disasterId, newZoneId, disasterName, validSeverity, radius_meters, io)
-            .catch(e => console.error('AI Agent background error:', e));
+        await logActivity({
+            action_type: 'INFO',
+            entity_type: 'ZONE',
+            entity_id: result.rows[0].id,
+            description: `Admin created a new ${validSeverity} severity relief zone: ${name} (${code})`,
+            user_id: req.dbUser?.id || req.user?.id,
+            metadata: { radius_meters, auto_ai }
+        });
+
+        // Automate resources requirements via AI Agent asynchronously if auto_ai is not explicitly false
+        if (auto_ai !== false) {
+            const newZoneId = result.rows[0].id;
+            const io = req.app.get('io');
+            aiResourceAgent.processZoneResources(disasterId, newZoneId, disasterName, validSeverity, radius_meters, io)
+                .catch(e => console.error('AI Agent background error:', e));
+        }
     } catch (err) {
         console.error('Error creating zone:', err);
         res.status(500).json({ message: 'Failed to create zone: ' + err.message });
