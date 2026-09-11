@@ -611,6 +611,29 @@ async function joinOrganization(req, res) {
     }
 }
 
+// ─── PUT /me/ai-preference — update AI allocation preference ───────────
+async function updateAiPreference(req, res) {
+    try {
+        const orgId = await getOrgIdForUser(req.user.id);
+        if (!orgId) return res.status(404).json({ message: 'No organization linked' });
+
+        const { ai_allocation_preference } = req.body;
+        if (!['full', 'partial', 'none', 'manual'].includes(ai_allocation_preference)) {
+            return res.status(400).json({ message: 'Invalid preference mode' });
+        }
+
+        await db.query(
+            `UPDATE organizations SET ai_allocation_preference = $1, updated_at = NOW() WHERE id = $2`,
+            [ai_allocation_preference, orgId]
+        );
+
+        res.json({ message: 'AI Preference updated successfully', ai_allocation_preference });
+    } catch (err) {
+        console.error('[500] updateAiPreference error:', err?.message || err);
+        res.status(500).json({ message: 'Failed to update AI preference' });
+    }
+}
+
 module.exports = {
     registerOrg,
     getMyOrg,
@@ -629,4 +652,5 @@ module.exports = {
     assignCoordinator,
     listNearbyOrganizations,
     joinOrganization,
+    updateAiPreference,
 };

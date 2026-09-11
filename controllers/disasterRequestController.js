@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const aiResourceAgent = require('../services/aiResourceAgent');
 
 // ──────────────────────────────────────────
 // ZONE CRUD (for disaster relief map)
@@ -17,6 +18,22 @@ async function createZone(req, res) {
         const code = `Z-${Date.now().toString(36).toUpperCase()}`;
         const validSeverity = ['red', 'yellow', 'blue'].includes(severity) ? severity : 'red';
 
+        // Check for duplicates (Duplicate-effort detection)
+        const dupCheck = await db.query(`
+            SELECT id FROM zones
+            WHERE disaster_id = $1 AND status = 'active'
+            AND ST_DWithin(center::geography, ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography, $4)
+            LIMIT 1
+        `, [disasterId, center_lng, center_lat, radius_meters]);
+
+        if (dupCheck.rows.length > 0) {
+            return res.status(409).json({ message: 'Request already active, help is on the way' });
+        }
+
+        // Fetch disaster name for the AI agent
+        const disasterResult = await db.query('SELECT name FROM disasters WHERE id = $1', [disasterId]);
+        const disasterName = disasterResult.rows.length > 0 ? disasterResult.rows[0].name : 'Unknown Disaster';
+
         const result = await db.query(
             `INSERT INTO zones (disaster_id, name, code, severity, radius_meters,
             center, boundary, status)
@@ -29,6 +46,12 @@ async function createZone(req, res) {
             [disasterId, name, code, validSeverity, radius_meters, center_lng, center_lat]
         );
         res.status(201).json(result.rows[0]);
+
+        // Automate resources requirements via AI Agent asynchronously
+        const newZoneId = result.rows[0].id;
+        const io = req.app.get('io');
+        aiResourceAgent.processZoneResources(disasterId, newZoneId, disasterName, validSeverity, radius_meters, io)
+            .catch(e => console.error('AI Agent background error:', e));
     } catch (err) {
         console.error('Error creating zone:', err);
         res.status(500).json({ message: 'Failed to create zone: ' + err.message });

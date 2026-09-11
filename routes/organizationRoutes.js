@@ -20,6 +20,7 @@ const {
     assignCoordinator,
     listNearbyOrganizations,
     joinOrganization,
+    updateAiPreference,
 } = require('../controllers/organizationController');
 const { listAllOrgs } = require('../controllers/disasterRequestController');
 
@@ -34,6 +35,7 @@ router.get('/list', verifyToken, checkRole('admin'), listAllOrgs);
 // All /me routes require organization role
 router.get('/me', verifyToken, checkRole('organization'), getMyOrg);
 router.put('/me', verifyToken, checkRole('organization'), updateOrg);
+router.put('/me/ai-preference', verifyToken, checkRole('organization'), updateAiPreference);
 router.get('/me/stats', verifyToken, checkRole('organization'), getOrgStats);
 
 // Volunteer management
