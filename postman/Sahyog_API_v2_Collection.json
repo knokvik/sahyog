@@ -1,0 +1,420 @@
+{
+  "info": {
+    "name": "Sahyog API v2.0 - Business Logic Fixes",
+    "description": "Updated API collection with new validation and authorization requirements. Use this to test the backend changes.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "SOS - Resolve with Proof (Volunteer)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{clerk_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"status\": \"resolved\",\n  \"resolution_proof\": [\n    \"https://example.com/proof1.jpg\",\n    \"https://example.com/proof2.jpg\"\n  ],\n  \"resolution_notes\": \"Provided first aid and called ambulance\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/sos/{{sos_id}}/status",
+          "host": ["{{base_url}}"],
+          "path": ["sos", "{{sos_id}}", "status"]
+        },
+        "description": "Volunteer resolving SOS - MUST include resolution_proof"
+      },
+      "response": []
+    },
+    {
+      "name": "SOS - Resolve without Proof (Coordinator Override)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{coordinator_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"status\": \"resolved\",\n  \"resolution_notes\": \"Verified and resolved by coordinator\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/sos/{{sos_id}}/status",
+          "host": ["{{base_url}}"],
+          "path": ["sos", "{{sos_id}}", "status"]
+        },
+        "description": "Coordinator can resolve without proof (override)"
+      },
+      "response": []
+    },
+    {
+      "name": "SOS - Resolve WITHOUT Proof (Should Fail)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{volunteer_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"status\": \"resolved\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/sos/{{sos_id}}/status",
+          "host": ["{{base_url}}"],
+          "path": ["sos", "{{sos_id}}", "status"]
+        },
+        "description": "This should fail with 403 - proof required for volunteers"
+      },
+      "response": []
+    },
+    {
+      "name": "Task - Accept with Validations",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{volunteer_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"status\": \"accepted\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/tasks/{{task_id}}/status",
+          "host": ["{{base_url}}"],
+          "path": ["tasks", "{{task_id}}", "status"]
+        },
+        "description": "Accept task - validates skills, distance (50km), and workload (max 3)"
+      },
+      "response": []
+    },
+    {
+      "name": "Task - Vote Completion (Should Fail - Own Task)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{volunteer_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"vote\": \"completed\",\n  \"note\": \"Good work!\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/tasks/{{own_task_id}}/vote-completion",
+          "host": ["{{base_url}}"],
+          "path": ["tasks", "{{own_task_id}}", "vote-completion"]
+        },
+        "description": "Should fail with 403 - cannot vote on own task"
+      },
+      "response": []
+    },
+    {
+      "name": "Task - Vote Completion (Other Volunteer's Task)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{other_volunteer_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"vote\": \"completed\",\n  \"note\": \"Verified completion\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/tasks/{{task_id}}/vote-completion",
+          "host": ["{{base_url}}"],
+          "path": ["tasks", "{{task_id}}", "vote-completion"]
+        },
+        "description": "Vote on another volunteer's completed task"
+      },
+      "response": []
+    },
+    {
+      "name": "Need - Resolve with Proof",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{volunteer_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"resolution_proof\": [\"https://example.com/need-proof.jpg\"],\n  \"resolution_notes\": \"Delivered supplies\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/needs/{{need_id}}/resolve",
+          "host": ["{{base_url}}"],
+          "path": ["needs", "{{need_id}}", "resolve"]
+        },
+        "description": "Resolve need - proof required for volunteers"
+      },
+      "response": []
+    },
+    {
+      "name": "Disaster - Resolve (Coordinator)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{coordinator_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/disasters/{{disaster_id}}/resolve",
+          "host": ["{{base_url}}"],
+          "path": ["disasters", "{{disaster_id}}", "resolve"]
+        },
+        "description": "Resolve disaster - checks for active tasks/SOS"
+      },
+      "response": []
+    },
+    {
+      "name": "Disaster - Resolve (Should Fail - Active Items)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{coordinator_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/disasters/{{disaster_with_active_items}}/resolve",
+          "host": ["{{base_url}}"],
+          "path": ["disasters", "{{disaster_with_active_items}}", "resolve"]
+        },
+        "description": "Should fail with 400 - has active tasks or SOS"
+      },
+      "response": []
+    },
+    {
+      "name": "Shelter - Check In (Valid)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{volunteer_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"count\": 5\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/shelters/{{shelter_id}}/checkin",
+          "host": ["{{base_url}}"],
+          "path": ["shelters", "{{shelter_id}}", "checkin"]
+        },
+        "description": "Check in evacuees - validates capacity"
+      },
+      "response": []
+    },
+    {
+      "name": "Shelter - Check In (Should Fail - Over Capacity)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{volunteer_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"count\": 100\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/shelters/{{nearly_full_shelter}}/checkin",
+          "host": ["{{base_url}}"],
+          "path": ["shelters", "{{nearly_full_shelter}}", "checkin"]
+        },
+        "description": "Should fail with 400 - exceeds capacity"
+      },
+      "response": []
+    },
+    {
+      "name": "Zone - Delete (Should Fail - Active Assignments)",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{admin_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/disasters/{{disaster_id}}/relief-zones/{{zone_with_assignments}}",
+          "host": ["{{base_url}}"],
+          "path": ["disasters", "{{disaster_id}}", "relief-zones", "{{zone_with_assignments}}"]
+        },
+        "description": "Should fail with 400 - has active tasks/volunteers/coordinators/resources"
+      },
+      "response": []
+    },
+    {
+      "name": "Task - Create (FK Validation)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{coordinator_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"medical\",\n  \"title\": \"Medical assistance required\",\n  \"description\": \"Multiple injuries at location\",\n  \"disaster_id\": \"{{disaster_id}}\",\n  \"zone_id\": \"{{zone_id}}\",\n  \"volunteer_id\": \"{{volunteer_id}}\",\n  \"sosId\": \"{{sos_id}}\",\n  \"meeting_point\": {\n    \"lat\": 19.0760,\n    \"lng\": 72.8777\n  }\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/tasks",
+          "host": ["{{base_url}}"]
+        },
+        "description": "Create task - validates all foreign keys exist"
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "clerk_token",
+      "value": "your_clerk_jwt_token",
+      "type": "string"
+    },
+    {
+      "key": "volunteer_token",
+      "value": "volunteer_jwt_token",
+      "type": "string"
+    },
+    {
+      "key": "coordinator_token",
+      "value": "coordinator_jwt_token",
+      "type": "string"
+    },
+    {
+      "key": "admin_token",
+      "value": "admin_jwt_token",
+      "type": "string"
+    },
+    {
+      "key": "sos_id",
+      "value": "sos_uuid",
+      "type": "string"
+    },
+    {
+      "key": "task_id",
+      "value": "task_uuid",
+      "type": "string"
+    },
+    {
+      "key": "need_id",
+      "value": "need_uuid",
+      "type": "string"
+    },
+    {
+      "key": "disaster_id",
+      "value": "disaster_uuid",
+      "type": "string"
+    },
+    {
+      "key": "shelter_id",
+      "value": "shelter_uuid",
+      "type": "string"
+    }
+  ]
+}

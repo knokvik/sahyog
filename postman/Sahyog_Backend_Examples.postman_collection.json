@@ -1,0 +1,100 @@
+{
+  "info": {
+    "name": "Sahyog Backend",
+    "description": "Sample requests to test the Sahyog API. Base URL: http://localhost:3000",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "token", "value": "YOUR_CLERK_SESSION_TOKEN" }
+  ],
+  "item": [
+    {
+      "name": "No auth (check backend works)",
+      "item": [
+        {
+          "name": "GET Root - Welcome",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/",
+            "description": "No auth. Should return welcome message."
+          }
+        },
+        {
+          "name": "GET Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/health",
+            "description": "No auth. Should return { ok: true }."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth required (need Clerk token)",
+      "item": [
+        {
+          "name": "GET /api/users/me",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }
+            ],
+            "url": "{{baseUrl}}/api/users/me",
+            "description": "Replace {{token}} with a real Clerk session token (e.g. from admin panel or getToken())."
+          }
+        }
+      ]
+    },
+    {
+      "name": "SOS (auth required)",
+      "item": [
+        {
+          "name": "POST Create SOS",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lat\": 19.0760,\n  \"lng\": 72.8777,\n  \"type\": \"medical\",\n  \"description\": \"Need help\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/sos",
+            "description": "Creates an SOS report. Requires auth."
+          }
+        },
+        {
+          "name": "GET List SOS",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }
+            ],
+            "url": "{{baseUrl}}/api/v1/sos",
+            "description": "List SOS reports (filtered by role)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Disasters (auth required)",
+      "item": [
+        {
+          "name": "GET List Disasters",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }
+            ],
+            "url": "{{baseUrl}}/api/v1/disasters",
+            "description": "List disasters."
+          }
+        }
+      ]
+    }
+  ]
+}

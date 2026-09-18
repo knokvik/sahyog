@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sahyog — Blue Signal & SOS Simulator</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <style>
+    :root {
+      --bg: #0b1013;
+      --card-bg: #151d23;
+      --card-border: #2a3439;
+      --primary: #10b981;
+      --primary-hover: #059669;
+      --danger: #ef4444;
+      --danger-hover: #dc2626;
+      --blue: #3b82f6;
+      --blue-hover: #2563eb;
+      --amber: #f59e0b;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 32px 16px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 680px;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-radius: 9999px;
+      background: rgba(59, 130, 246, 0.15);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      color: #60a5fa;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #10b981;
+      box-shadow: 0 0 8px #10b981;
+    }
+
+    .status-dot.offline {
+      background: #ef4444;
+      box-shadow: 0 0 8px #ef4444;
+    }
+
+    h1 {
+      font-size: 26px;
+      font-weight: 800;
+      margin-bottom: 6px;
+    }
+
+    p.subtitle {
+      color: var(--text-muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+    }
+
+    .card-title {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    @media (max-width: 540px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    button {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      padding: 14px 16px;
+      border-radius: 12px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      color: white;
+      transition: all 0.18s ease-in-out;
+      text-align: left;
+      width: 100%;
+    }
+
+    button:active {
+      transform: scale(0.98);
+    }
+
+    button .btn-title {
+      font-size: 14px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+
+    button .btn-desc {
+      font-size: 11px;
+      font-weight: 400;
+      opacity: 0.85;
+      line-height: 1.3;
+    }
+
+    .btn-blue {
+      background: #1e3a8a;
+      border-color: #3b82f6;
+    }
+    .btn-blue:hover {
+      background: #1d4ed8;
+      box-shadow: 0 0 16px rgba(59, 130, 246, 0.4);
+    }
+
+    .btn-red {
+      background: #7f1d1d;
+      border-color: #ef4444;
+    }
+    .btn-red:hover {
+      background: #b91c1c;
+      box-shadow: 0 0 16px rgba(239, 68, 68, 0.4);
+    }
+
+    .btn-amber {
+      background: #78350f;
+      border-color: #f59e0b;
+    }
+    .btn-amber:hover {
+      background: #b45309;
+      box-shadow: 0 0 16px rgba(245, 158, 11, 0.4);
+    }
+
+    .btn-green {
+      background: #064e3b;
+      border-color: #10b981;
+    }
+    .btn-green:hover {
+      background: #047857;
+      box-shadow: 0 0 16px rgba(16, 185, 129, 0.4);
+    }
+
+    .form-group {
+      margin-bottom: 12px;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+
+    input, select, textarea {
+      width: 100%;
+      background: #0b1013;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+
+    .log-box {
+      background: #06090b;
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 12px;
+      font-family: "SF Mono", Monaco, Consolas, monospace;
+      font-size: 12px;
+      color: #34d399;
+      height: 140px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+
+    .log-entry {
+      margin-bottom: 4px;
+    }
+    .log-entry.error {
+      color: #f87171;
+    }
+    .log-entry.info {
+      color: #60a5fa;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="badge">
+        <div id="statusDot" class="status-dot"></div>
+        <span id="statusText">Connected to Localhost:3000</span>
+      </div>
+      <h1>Signal Simulation Controller</h1>
+      <p class="subtitle">
+        One-click triggers to broadcast live Blue Signals & SOS alerts directly to your running iOS Simulator / App.
+      </p>
+    </header>
+
+    <!-- Quick 1-Click Simulation Buttons -->
+    <div class="card">
+      <div class="card-title">📡 1-Click Instant Simulator Triggers</div>
+      <div class="grid">
+        <button class="btn-blue" onclick="triggerBlueSignal()">
+          <span class="btn-title">🔵 Blue Signal (BLE Mesh)</span>
+          <span class="btn-desc">Simulates peer-to-peer Bluetooth packet relay with hop count.</span>
+        </button>
+
+        <button class="btn-red" onclick="triggerMedicalSos()">
+          <span class="btn-title">🚨 Critical Medical SOS</span>
+          <span class="btn-desc">High-priority emergency alert with live GPS coordinates.</span>
+        </button>
+
+        <button class="btn-amber" onclick="triggerFloodRescue()">
+          <span class="btn-title">🌊 Flood Trap Evacuation</span>
+          <span class="btn-desc">Trapped family beacon with family contacts attached.</span>
+        </button>
+
+        <button class="btn-green" onclick="triggerResolveAlert()">
+          <span class="btn-title">✅ Resolve / Clear Active Alert</span>
+          <span class="btn-desc">Emits real-time resolve event to dismiss popup and update tabs.</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Custom Parameter Trigger -->
+    <div class="card">
+      <div class="card-title">⚙️ Custom Incident Parameters</div>
+      <div class="grid" style="margin-bottom: 12px;">
+        <div class="form-group">
+          <label>Reporter Name</label>
+          <input type="text" id="reporterName" value="Aarav Deshmukh (BLE Relay)" />
+        </div>
+        <div class="form-group">
+          <label>Emergency Type</label>
+          <select id="emergencyType">
+            <option value="Severe Medical Emergency">Severe Medical Emergency</option>
+            <option value="Building Collapse / Trapped">Building Collapse / Trapped</option>
+            <option value="Flood Water Level Rising">Flood Water Level Rising</option>
+            <option value="Fire Outbreak">Fire Outbreak</option>
+            <option value="Blue Signal Ping">Blue Signal Ping</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Description / Distress Message</label>
+        <input type="text" id="description" value="Immediate medical assistance needed at Kothrud Sector 4. Relayed via Bluetooth node." />
+      </div>
+      <button class="btn-blue" style="width: 100%; align-items: center; justify-content: center; padding: 12px;" onclick="triggerCustomSignal()">
+        🚀 Send Custom Blue Signal to Simulator
+      </button>
+    </div>
+
+    <!-- Activity Log -->
+    <div class="card">
+      <div class="card-title">📜 Real-Time Broadcast Logs</div>
+      <div id="logBox" class="log-box">
+        <div class="log-entry info">[System] Simulator Controller Ready. Targeting http://localhost:3000...</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const SERVER_URL = 'http://localhost:3000';
+    let socket = null;
+    let lastAlertId = null;
+
+    function log(msg, type = '') {
+      const box = document.getElementById('logBox');
+      const time = new Date().toLocaleTimeString();
+      const div = document.createElement('div');
+      div.className = 'log-entry ' + type;
+      div.innerText = `[${time}] ${msg}`;
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    // Initialize Socket.io connection
+    try {
+      socket = io(SERVER_URL, { transports: ['websocket'] });
+
+      socket.on('connect', () => {
+        document.getElementById('statusDot').className = 'status-dot';
+        document.getElementById('statusText').innerText = 'Connected: Localhost:3000';
+        log('Connected to Sahyog Socket Server.', 'info');
+      });
+
+      socket.on('connect_error', (err) => {
+        document.getElementById('statusDot').className = 'status-dot offline';
+        document.getElementById('statusText').innerText = 'Disconnected from Server';
+        log(`Socket Connection Error: ${err.message}`, 'error');
+      });
+    } catch (e) {
+      log('Socket init failed: ' + e.message, 'error');
+    }
+
+    async function sendMeshPacket(packet) {
+      log(`Broadcasting signal: "${packet.type}" from ${packet.reporter_name}...`);
+      try {
+        const response = await fetch(`${SERVER_URL}/api/mesh/sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ packets: [packet] })
+        });
+        const data = await response.json();
+        if (response.ok) {
+          lastAlertId = data.details?.[0]?.id || packet.uuid;
+          log(`✅ SUCCESS: Signal relayed! Server returned alert ID: ${lastAlertId}`, 'info');
+          log(`📲 Watch your iOS Simulator — red emergency popup will appear!`, 'info');
+        } else {
+          // Direct socket fallback
+          log(`⚠️ API returned ${response.status}. Emitting direct Socket.io fallback...`, 'error');
+          socket.emit('new_sos_alert', packet);
+          log(`✅ Direct Socket.io broadcast emitted!`, 'info');
+        }
+      } catch (err) {
+        log(`Network error: ${err.message}. Emitting direct Socket fallback...`, 'error');
+        if (socket && socket.connected) {
+          socket.emit('new_sos_alert', packet);
+          log(`✅ Fallback Socket emitted!`, 'info');
+        }
+      }
+    }
+
+    function triggerBlueSignal() {
+      const uid = 'ble-' + Math.random().toString(36).substr(2, 9);
+      lastAlertId = uid;
+      sendMeshPacket({
+        uuid: uid,
+        reporter_name: 'Rohit (Blue Signal Mesh)',
+        reporter_phone: '+91 98230 44551',
+        type: 'Blue Signal Ping',
+        description: 'BLE beacon mesh pulse detected from isolated area.',
+        priority: 88,
+        lat: 18.5204,
+        lng: 73.8567,
+        source: 'mesh_ble',
+        hop_count: 3,
+        family_contacts: [
+          { name: 'Suresh Patil', phone: '+91 99221 00000', status: 'pending' }
+        ]
+      });
+    }
+
+    function triggerMedicalSos() {
+      const uid = 'med-' + Math.random().toString(36).substr(2, 9);
+      lastAlertId = uid;
+      sendMeshPacket({
+        uuid: uid,
+        reporter_name: 'Pooja Kulkarni (Medical)',
+        reporter_phone: '+91 97654 32109',
+        type: 'Severe Medical Emergency',
+        description: 'Elderly person requires oxygen cylinder assistance at Shaniwar Peth.',
+        priority: 95,
+        lat: 18.5195,
+        lng: 73.8553,
+        source: 'app_direct',
+        hop_count: 1,
+        family_contacts: []
+      });
+    }
+
+    function triggerFloodRescue() {
+      const uid = 'flood-' + Math.random().toString(36).substr(2, 9);
+      lastAlertId = uid;
+      sendMeshPacket({
+        uuid: uid,
+        reporter_name: 'Aniket Shinde (Flood Trap)',
+        reporter_phone: '+91 98888 77777',
+        type: 'Flood Water Level Rising',
+        description: 'Ground floor submerged. 4 people trapped on terrace near Mutha river.',
+        priority: 92,
+        lat: 18.5140,
+        lng: 73.8420,
+        source: 'mesh_ble',
+        hop_count: 2,
+        family_contacts: [
+          { name: 'Neeta Shinde', phone: '+91 98888 66666', status: 'pending' }
+        ]
+      });
+    }
+
+    function triggerCustomSignal() {
+      const uid = 'custom-' + Math.random().toString(36).substr(2, 9);
+      lastAlertId = uid;
+      sendMeshPacket({
+        uuid: uid,
+        reporter_name: document.getElementById('reporterName').value,
+        reporter_phone: '+91 99000 11223',
+        type: document.getElementById('emergencyType').value,
+        description: document.getElementById('description').value,
+        priority: 90,
+        lat: 18.5204 + (Math.random() - 0.5) * 0.02,
+        lng: 73.8567 + (Math.random() - 0.5) * 0.02,
+        source: 'mesh_ble',
+        hop_count: 2,
+        family_contacts: []
+      });
+    }
+
+    function triggerResolveAlert() {
+      if (!lastAlertId) {
+        log('No active simulated alert ID found to resolve. Emitting global resolve pulse...', 'info');
+      }
+      log(`Emitting "sos_resolved" event for ID: ${lastAlertId || 'all'}...`);
+      if (socket && socket.connected) {
+        socket.emit('sos_resolved', { id: lastAlertId, status: 'resolved' });
+        log('✅ "sos_resolved" socket broadcast sent!', 'info');
+      } else {
+        log('Socket not connected to server.', 'error');
+      }
+    }
+  </script>
+</body>
+</html>
