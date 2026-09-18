@@ -45,7 +45,25 @@ async function ensureUserSchema() {
     await db.query(`
       ALTER TABLE organizations ADD COLUMN IF NOT EXISTS type varchar DEFAULT 'ngo';
       ALTER TABLE organizations ADD COLUMN IF NOT EXISTS location geometry(Point, 4326);
+      ALTER TABLE organizations ADD COLUMN IF NOT EXISTS ai_allocation_preference varchar(20) DEFAULT 'full';
       CREATE INDEX IF NOT EXISTS idx_organizations_location ON organizations USING GIST(location);
+    `);
+
+    // 4b. Activity logs used by Sairaj AI / audit features
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS activity_logs (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          action_type varchar NOT NULL DEFAULT 'INFO',
+          entity_type varchar NOT NULL DEFAULT 'SYSTEM',
+          entity_id uuid,
+          description text,
+          organization_id uuid REFERENCES organizations(id) ON DELETE SET NULL,
+          user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+          metadata jsonb,
+          created_at timestamp DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON activity_logs(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_activity_logs_org ON activity_logs(organization_id);
     `);
 
     // 5. Update role constraint.

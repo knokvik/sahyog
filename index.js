@@ -149,6 +149,7 @@ app.use('/api/v1/volunteer-assignments', require('./routes/volunteerAssignmentRo
 app.use('/api/v1/admin/workflows', require('./routes/adminWorkflowRoutes'));
 app.use('/api/v1/uploads', require('./routes/uploadRoutes'));
 app.use('/api/v1/locations', locationRoutes);
+app.use('/api/v1/logs', require('./routes/activityLogRoutes'));
 
 // Error Handling Middleware
 app.use(notFound);
