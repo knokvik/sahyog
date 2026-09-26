@@ -1,4 +1,8 @@
-**Sahyog API**
+<p align="center">
+  <img src="assets/sahyog-logo.png" alt="Sahyog" width="96" />
+</p>
+
+<p align="center"><strong>Sahyog Server</strong></p>
 
 This is the server behind JanRakshak. Phones, the coordinator desk, beacons, and a phone keypad all send reports here. The server stores them, scores them, and tells the live desk what changed.
 
